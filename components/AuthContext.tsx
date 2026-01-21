@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db } from '../services/firebaseConfig';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { MODULES } from './SidebarMenu';
 
 export interface CompanyMembership {
     companyId: string;
@@ -10,6 +11,7 @@ export interface CompanyMembership {
     status: 'active' | 'pending';
     allowedModules?: string[];
     companyName?: string; // Optional cached name
+    isOwner?: boolean;
 }
 
 interface UserData {
@@ -23,12 +25,15 @@ interface UserData {
     // Multi-tenant support
     memberships?: CompanyMembership[];
     currentCompanyId?: string | null;
+    isSystemAdmin?: boolean; // New field for system admins
 
     // Computed properties based on current context (for backward compatibility)
     companyId?: string | null;
-    role?: 'admin' | 'member' | null;
+    role?: 'admin' | 'member' | 'super_admin' | null;
     status?: 'active' | 'pending' | null;
     allowedModules?: string[] | null;
+    companyModules?: string[]; // Modules enabled for the company
+    isOwner?: boolean;
 }
 
 interface AuthContextType {
@@ -57,16 +62,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fetchUserData = async (uid: string) => {
         try {
             const userDocRef = doc(db, 'users', uid);
+            // 1. Check if it's a Super Admin RIGHT NOW based on Auth Email
+            // This prevents loops if the Firestore document doesn't exist yet
+            const authEmail = auth.currentUser?.email?.toLowerCase();
+            const isHardcodedAdmin = authEmail === 'darlanconrado01@gmail.com';
+            const superAdminModules = ['dashboard', 'usuarios', 'empresas'];
+
             const userDoc = await getDoc(userDocRef);
 
             if (userDoc.exists()) {
                 const rawData = userDoc.data();
 
-                // BACKWARD COMPATIBILITY & MIGRATION ON READ
-                // If old structure (flat companyId) exists but no memberships, convert on the fly for state
+                // ... (rest of the logic for existing docs)
                 let memberships: CompanyMembership[] = rawData.memberships || [];
-
-                // If legacy data exists and not yet in memberships, add it
                 if (!memberships.length && rawData.companyId) {
                     memberships.push({
                         companyId: rawData.companyId,
@@ -76,30 +84,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     });
                 }
 
-                // Determine Active Context
-                // Use stored currentCompanyId, or fallback to first membership, or legacy companyId
                 const currentCompanyId = rawData.currentCompanyId || rawData.companyId || (memberships.length > 0 ? memberships[0].companyId : null);
-
-                // Find active membership details
                 const activeMembership = memberships.find(m => m.companyId === currentCompanyId);
+
+                let isOwner = false;
+                let companyModules: string[] = [];
+                if (currentCompanyId) {
+                    const companyDoc = await getDoc(doc(db, 'companies', currentCompanyId));
+                    if (companyDoc.exists()) {
+                        const companyData = companyDoc.data();
+                        isOwner = companyData.ownerId === uid;
+                        companyModules = companyData.modules || [];
+                    }
+                }
+
+                const isSuperAdmin = rawData.isSystemAdmin || isHardcodedAdmin;
+
+                // Ensure we always have email and displayName
+                const userEmail = rawData.email || auth.currentUser?.email || null;
+                const userDisplayName = rawData.displayName || auth.currentUser?.displayName || 'Usuário';
+                const userPhotoUrl = rawData.photoUrl || auth.currentUser?.photoURL || null;
 
                 const finalUserData: UserData = {
                     uid: uid,
-                    email: rawData.email,
-                    displayName: rawData.displayName,
-                    photoUrl: rawData.photoUrl,
+                    email: userEmail,
+                    displayName: userDisplayName,
+                    photoUrl: userPhotoUrl,
                     phone: rawData.phone,
                     city: rawData.city,
                     memberships: memberships,
-                    currentCompanyId: currentCompanyId,
-
-                    // Computed context fields
-                    companyId: currentCompanyId,
-                    role: activeMembership ? activeMembership.role : null,
-                    status: activeMembership ? activeMembership.status : null,
-                    allowedModules: activeMembership ? activeMembership.allowedModules : null
+                    currentCompanyId: isSuperAdmin ? null : currentCompanyId,
+                    isSystemAdmin: isSuperAdmin,
+                    companyId: isSuperAdmin ? null : currentCompanyId,
+                    role: isSuperAdmin ? 'super_admin' : (activeMembership ? activeMembership.role : null),
+                    status: isSuperAdmin ? 'active' : (activeMembership ? activeMembership.status : 'active'),
+                    allowedModules: isSuperAdmin ? superAdminModules : (activeMembership ? activeMembership.allowedModules : (rawData.isSystemAdmin ? [] : null)),
+                    companyModules: isSuperAdmin ? superAdminModules : companyModules,
+                    isOwner: isSuperAdmin ? false : isOwner
                 };
-
+                setUserData(finalUserData);
+            } else if (isHardcodedAdmin) {
+                // Handle Super Admin with NO Firestore doc yet
+                const finalUserData: UserData = {
+                    uid: uid,
+                    email: authEmail || null,
+                    displayName: auth.currentUser?.displayName || 'Admin Master',
+                    isSystemAdmin: true,
+                    role: 'super_admin',
+                    status: 'active',
+                    companyId: null,
+                    allowedModules: superAdminModules,
+                    companyModules: superAdminModules,
+                    isOwner: false,
+                    memberships: []
+                };
                 setUserData(finalUserData);
             } else {
                 setUserData(null);
@@ -127,7 +165,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     useEffect(() => {
+        // Safety timeout - if auth doesn't respond in 10 seconds, stop loading
+        const safetyTimeout = setTimeout(() => {
+            console.warn('Auth initialization timeout - forcing loading to false');
+            setLoading(false);
+        }, 10000);
+
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            clearTimeout(safetyTimeout);
             setUser(currentUser);
             if (currentUser) {
                 await fetchUserData(currentUser.uid);
@@ -137,7 +182,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setLoading(false);
         });
 
-        return () => unsubscribe();
+        return () => {
+            clearTimeout(safetyTimeout);
+            unsubscribe();
+        };
     }, []);
 
     const refreshUserData = async () => {
@@ -148,7 +196,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return (
         <AuthContext.Provider value={{ user, userData, loading, refreshUserData, switchCompany }}>
-            {!loading && children}
+            {loading ? (
+                <div style={{ display: 'flex', height: '100vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)' }}>
+                    <div className="loading-spinner" style={{ width: '40px', height: '40px', borderTopColor: 'var(--primary-color)' }}></div>
+                </div>
+            ) : children}
         </AuthContext.Provider>
     );
 };

@@ -170,7 +170,6 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                                 </div>
                             </div>
 
-                            {/* Description */}
                             <div style={{
                                 marginBottom: `${layoutConfig.spacingBelowDescription}px`,
                                 textAlign: 'center',
@@ -179,11 +178,6 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                                 color: layoutConfig.colorDescription,
                                 lineHeight: '1.2',
                                 fontWeight: 500,
-                                display: '-webkit-box',
-                                WebkitLineClamp: 3,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                                maxHeight: '3.6em' // Approximate max height for 3 lines
                             }}>
                                 {product.description}
                             </div>

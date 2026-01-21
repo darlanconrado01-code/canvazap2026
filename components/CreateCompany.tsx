@@ -10,8 +10,14 @@ const CreateCompany = () => {
     const [companyName, setCompanyName] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const { user, refreshUserData } = useAuth();
+    const { user, userData, refreshUserData } = useAuth();
     const navigate = useNavigate();
+
+    React.useEffect(() => {
+        if (userData?.role === 'super_admin') {
+            navigate('/admin', { replace: true });
+        }
+    }, [userData, navigate]);
 
     const generateCompanyCode = () => {
         const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -38,6 +44,7 @@ const CreateCompany = () => {
                 name: companyName,
                 code: code,
                 ownerId: user.uid,
+                status: 'inactive', // Companies start inactive until activated by support
                 createdAt: new Date(),
             });
 
@@ -47,7 +54,8 @@ const CreateCompany = () => {
                     companyId: companyId,
                     role: 'admin',
                     status: 'active',
-                    companyName: companyName
+                    companyName: companyName,
+                    isOwner: true
                 }),
                 currentCompanyId: companyId // Switch context immediately
             }, { merge: true });

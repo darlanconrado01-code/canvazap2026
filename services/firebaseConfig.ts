@@ -14,8 +14,35 @@ const firebaseConfig = {
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
+// Debug: Log config in development (remove in production)
+if (import.meta.env.DEV) {
+    console.log('Firebase Config:', {
+        ...firebaseConfig,
+        apiKey: firebaseConfig.apiKey ? '***' + firebaseConfig.apiKey.slice(-4) : 'MISSING'
+    });
+}
+
+// Validate required fields
+const requiredFields = ['apiKey', 'authDomain', 'projectId', 'appId'];
+const missingFields = requiredFields.filter(field => !firebaseConfig[field as keyof typeof firebaseConfig]);
+
+if (missingFields.length > 0) {
+    console.error('Missing Firebase config fields:', missingFields);
+    throw new Error(`Firebase configuration incomplete. Missing: ${missingFields.join(', ')}`);
+}
+
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-export const analytics = getAnalytics(app);
+
+// Only initialize analytics in browser environment
+let analytics;
+if (typeof window !== 'undefined') {
+    try {
+        analytics = getAnalytics(app);
+    } catch (error) {
+        console.warn('Analytics initialization failed:', error);
+    }
+}
+export { analytics };

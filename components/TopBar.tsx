@@ -17,6 +17,11 @@ const TopBar = () => {
 
     useEffect(() => {
         const fetchCompanyName = async () => {
+            if (userData?.role === 'super_admin') {
+                setCompanyName('Painel Master');
+                return;
+            }
+
             if (userData?.companyId) {
                 // Try to find name in membership first (optimization)
                 const membership = userData.memberships?.find(m => m.companyId === userData.companyId);
@@ -36,6 +41,10 @@ const TopBar = () => {
 
     // Mapping path to Title
     const getTitle = (pathname: string) => {
+        if (pathname === '/admin') return 'Dashboard Global';
+        if (pathname === '/admin/empresas') return 'Gestão de Empresas';
+        if (pathname === '/admin/usuarios') return 'Gerenciamento Global de Usuários';
+
         switch (pathname) {
             case '/': return 'Dashboard';
             case '/laminas': return 'Lâminas';
@@ -44,7 +53,7 @@ const TopBar = () => {
             case '/encartes': return 'Encartes';
             case '/crachas': return 'Crachás';
             case '/temas': return 'Temas';
-            case '/usuarios': return 'Gerenciamento de Usuários';
+            case '/usuarios': return 'Membros da Equipe';
             case '/profile': return 'Meu Perfil';
             default: return 'CanvaZap';
         }
@@ -126,11 +135,12 @@ const TopBar = () => {
                             </div>
                         )}
                         <div style={{ display: 'flex', flexDirection: 'column', marginRight: '0.5rem' }}>
-                            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-color)' }}>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                 {userData?.displayName?.split(' ')[0]}
+                                {userData?.role === 'super_admin' && <span style={{ fontSize: '0.6rem', background: 'linear-gradient(135deg, #FFD700, #FFA500)', color: '#000', padding: '2px 6px', borderRadius: '4px', fontWeight: 900 }}>MASTER</span>}
                             </span>
                             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                {companyName || (userData?.role === 'admin' ? 'Admin' : 'Membro')}
+                                {companyName || (userData?.role === 'super_admin' ? 'Painel Master' : (userData?.role === 'admin' ? 'Admin' : 'Membro'))}
                                 {hasMultipleCompanies && <ChevronDown size={12} />}
                             </span>
                         </div>

@@ -3,32 +3,10 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import {
-    LayoutDashboard,
-    FileImage,
-    Layers,
-    Image,
-    BookOpen,
-    CreditCard,
-    Palette,
-    Users,
-    LogOut,
-    Inbox,
-    Settings
+    LogOut
 } from 'lucide-react';
 import { auth } from '../services/firebaseConfig';
-// import { MODULES } from './Sidebar'; // Removed circular import
-
-export const MODULES = [
-    { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, path: '/' },
-    { id: 'laminas', name: 'Lâminas', icon: FileImage, path: '/laminas' },
-    { id: 'laminas-plus', name: 'Lâminas Plus', icon: Layers, path: '/laminas-plus' },
-    { id: 'banco-imagens', name: 'Banco de Imagens', icon: Image, path: '/banco-imagens' },
-    { id: 'encartes', name: 'Encartes', icon: BookOpen, path: '/encartes' },
-    { id: 'crachas', name: 'Crachás', icon: CreditCard, path: '/crachas' },
-    { id: 'temas', name: 'Temas', icon: Palette, path: '/temas' },
-    { id: 'usuarios', name: 'Usuários', icon: Users, path: '/usuarios', adminOnly: true },
-    { id: 'solicitacoes', name: 'Solicitações de Imagens', icon: Inbox, path: '/solicitacoes', adminOnly: true },
-];
+import { MODULES } from './SidebarMenu';
 
 // We can refine grouping logic here
 const MENU_GROUPS = [
@@ -51,12 +29,24 @@ const Sidebar = () => {
 
     const hasAccess = (moduleId: string) => {
         if (!userData) return false;
+
         const moduleDefs = MODULES.find(m => m.id === moduleId);
         if (!moduleDefs) return false;
 
-        if (userData.role === 'admin') return true;
-        if (moduleDefs.adminOnly) return false;
+        if (moduleDefs.superAdminOnly) return false;
+
+        // 1. Check if COMPANY has access to this module
+        if (moduleId !== 'dashboard' && userData.companyModules && !userData.companyModules.includes(moduleId)) {
+            return false;
+        }
+
+        // 2. User level checks
+        if (userData.isOwner) return true; // Owner has access to all company-enabled modules
+
+        // Basic dashboard access
         if (moduleId === 'dashboard') return true;
+
+        // For all other modules, respect the selection
         return userData.allowedModules?.includes(moduleId);
     };
 
@@ -65,7 +55,7 @@ const Sidebar = () => {
             style={{
                 width: '290px',
                 backgroundColor: 'var(--surface-color)',
-                borderRight: '1px solid var(--border-color)', // Clean border instead of gap
+                borderRight: '1px solid var(--border-color)',
                 display: 'flex',
                 flexDirection: 'column',
                 padding: '2rem 1.5rem',
@@ -117,6 +107,11 @@ const Sidebar = () => {
 
             {/* Footer / Logout */}
             <div style={{ marginTop: 'auto', paddingTop: '1rem' }}>
+                {userData?.role === 'super_admin' && (
+                    <NavLink to="/admin" className="sidebar-link" style={{ marginBottom: '0.5rem', color: 'var(--primary-color)' }}>
+                        <span>Painel Master</span>
+                    </NavLink>
+                )}
                 <button
                     onClick={() => auth.signOut()}
                     className="sidebar-link"
@@ -129,8 +124,5 @@ const Sidebar = () => {
         </aside>
     );
 };
-
-// Re-export the MODULES definition for consistency
-
 
 export default Sidebar;

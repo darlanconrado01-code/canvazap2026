@@ -12,8 +12,14 @@ const JoinCompany = () => {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
-    const { user, refreshUserData } = useAuth();
+    const { user, userData, refreshUserData } = useAuth();
     const navigate = useNavigate();
+
+    React.useEffect(() => {
+        if (userData?.role === 'super_admin') {
+            navigate('/admin', { replace: true });
+        }
+    }, [userData, navigate]);
     const location = useLocation();
 
     useEffect(() => {

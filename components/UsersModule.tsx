@@ -2,25 +2,23 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import { db } from '../services/firebaseConfig';
-import { collection, query, where, getDocs, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
 import {
     Copy,
     Check,
     UserPlus,
     Mail,
-    Shield,
     User as UserIcon,
-    MoreVertical,
     CheckCircle,
     XCircle,
     Loader2
 } from 'lucide-react';
-import { MODULES } from './Sidebar';
+import { MODULES } from './SidebarMenu';
 
 const UsersModule = () => {
     const { userData } = useAuth();
     const [company, setCompany] = useState<any>(null);
-    const [users, setUsers] = useState<any[]>([]); // Active users
+    const [users, setUsers] = useState<any[]>([]);
     const [pendingUsers, setPendingUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -38,24 +36,26 @@ const UsersModule = () => {
     }, [userData]);
 
     const fetchData = async () => {
-        if (!userData?.companyId) return;
-        setLoading(true);
+        if (!userData?.companyId) {
+            setLoading(false);
+            return;
+        }
 
+        setLoading(true);
         try {
-            // Fetch Company Details (for Code)
+            // Fetch Company Details
             const companyDoc = await getDoc(doc(db, 'companies', userData.companyId));
             if (companyDoc.exists()) {
                 setCompany(companyDoc.data());
             }
 
-            // Fetch Users
+            // Fetch Company Users
             const q = query(collection(db, 'users'), where('companyId', '==', userData.companyId));
             const querySnapshot = await getDocs(q);
-            const allUsers = querySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+            const allUsersData = querySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
 
-            setUsers(allUsers.filter((u: any) => u.status === 'active' || u.status === undefined)); // Assuming undefined is effectively active legacy
-            setPendingUsers(allUsers.filter((u: any) => u.status === 'pending'));
-
+            setUsers(allUsersData.filter((u: any) => u.status === 'active' || !u.status));
+            setPendingUsers(allUsersData.filter((u: any) => u.status === 'pending'));
         } catch (error) {
             console.error("Error fetching users:", error);
         } finally {
@@ -64,7 +64,8 @@ const UsersModule = () => {
     };
 
     const handleCopyLink = () => {
-        const link = `${window.location.origin}/join-company?code=${company?.code}`;
+        if (!company?.code) return;
+        const link = `${window.location.origin}/join-company?code=${company.code}`;
         navigator.clipboard.writeText(link);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -72,10 +73,8 @@ const UsersModule = () => {
 
     const handleApprove = async (uid: string) => {
         try {
-            await updateDoc(doc(db, 'users', uid), {
-                status: 'active'
-            });
-            fetchData(); // Refresh list
+            await updateDoc(doc(db, 'users', uid), { status: 'active' });
+            fetchData();
         } catch (error) {
             console.error(error);
         }
@@ -83,7 +82,6 @@ const UsersModule = () => {
 
     const handleReject = async (uid: string) => {
         try {
-            // Remove companyId from user to effectively "reject" them from this view
             await updateDoc(doc(db, 'users', uid), {
                 companyId: null,
                 status: null,
@@ -99,33 +97,40 @@ const UsersModule = () => {
         e.preventDefault();
         setInviteLoading(true);
         setInviteSuccess('');
-
         try {
-            // Check if user exists already
             const q = query(collection(db, 'users'), where('email', '==', inviteEmail));
             const snapshot = await getDocs(q);
-
             if (!snapshot.empty) {
-                // User exists, add them directly if they don't have a company?
-                // Or just update them. For this demo, let's update them if they are "free".
                 const targetUser = snapshot.docs[0];
                 const targetUserData = targetUser.data();
 
                 if (targetUserData.companyId && targetUserData.companyId !== userData?.companyId) {
-                    setInviteSuccess('Usuário já pertence a outra empresa.');
+                    setInviteSuccess('Usuário já pertence à outra empresa.');
                 } else {
+                    let memberships = targetUserData.memberships || [];
+                    const existingIdx = memberships.findIndex((m: any) => m.companyId === userData?.companyId);
+                    const membershipData = {
+                        companyId: userData!.companyId,
+                        role: inviteRole,
+                        status: 'active',
+                        companyName: company?.name || 'Empresa',
+                        allowedModules: inviteRole === 'admin' ? MODULES.filter(m => !m.superAdminOnly).map(m => m.id) : []
+                    };
+
+                    if (existingIdx >= 0) memberships[existingIdx] = membershipData;
+                    else memberships.push(membershipData);
+
                     await updateDoc(doc(db, 'users', targetUser.id), {
                         companyId: userData!.companyId,
                         role: inviteRole,
-                        status: 'active' // Direct approval
+                        status: 'active',
+                        memberships: memberships,
+                        allowedModules: membershipData.allowedModules
                     });
                     setInviteSuccess('Usuário adicionado com sucesso!');
                     fetchData();
                 }
             } else {
-                // User doesn't exist. Create an "Invitation" record (optional, or just mock success)
-                // Real-world: Send email via Cloud Function.
-                // Here: We'll just visually confirm.
                 setInviteSuccess(`Convite enviado para ${inviteEmail} (Simulado).`);
             }
             setInviteEmail('');
@@ -137,140 +142,74 @@ const UsersModule = () => {
         }
     };
 
-    if (loading) return <div>Carregando...</div>;
+    if (loading) return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
+            <Loader2 className="loading-spinner" size={48} />
+        </div>
+    );
+
+    const isCompanyOwner = userData?.uid === company?.ownerId;
+    const isRegularAdmin = userData?.role === 'admin';
 
     return (
         <div className="fade-in">
-            {/* Header Cards */}
+            {/* Invite Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-                {/* Invite Link Card */}
                 <div className="glass-card">
                     <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <UserPlus size={20} className="text-primary" />
-                        Repassar Link de Convite
+                        Link de Convite
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                        Compartilhe este link ou código para que pessoas solicitem entrada.
+                        Convide membros para a <strong>{company?.name}</strong>.
                     </p>
-
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                        <div style={{
-                            flex: 1, background: 'var(--bg-color)', padding: '0.75rem', borderRadius: '8px',
-                            fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                        }}>
-                            <span>{company?.code}</span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>CÓDIGO</span>
-                        </div>
+                    <div style={{ background: 'var(--bg-color)', padding: '0.75rem', borderRadius: '8px', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <span>{company?.code}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>CÓDIGO</span>
                     </div>
-
-                    <button
-                        onClick={handleCopyLink}
-                        className={copied ? "btn" : "btn btn-primary"}
-                        style={{ backgroundColor: copied ? 'var(--success-color)' : '' }}
-                    >
+                    <button onClick={handleCopyLink} className={copied ? "btn" : "btn btn-primary"} style={{ backgroundColor: copied ? 'var(--success-color)' : '' }}>
                         {copied ? <Check size={18} /> : <Copy size={18} />}
-                        {copied ? 'Copiado!' : 'Copiar Link de Convite'}
+                        {copied ? 'Copiado!' : 'Copiar Link'}
                     </button>
-                    <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                        {window.location.origin}/join-company?code={company?.code}
-                    </div>
                 </div>
 
-                {/* Direct Invite Card */}
                 <div className="glass-card">
                     <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Mail size={20} className="text-primary" />
-                        Convidar por E-mail
+                        Convidar Direto
                     </h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                        Adicione membros diretamente. Se eles já tiverem conta, serão adicionados automaticamente.
-                    </p>
-
                     <form onSubmit={handleInvite}>
-                        <div className="form-group">
-                            <input
-                                type="email"
-                                className="form-input"
-                                placeholder="E-mail do colaborador"
-                                value={inviteEmail}
-                                onChange={e => setInviteEmail(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <div className="form-group" style={{ display: 'flex', gap: '1rem' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                                <input
-                                    type="radio"
-                                    name="role"
-                                    value="member"
-                                    checked={inviteRole === 'member'}
-                                    onChange={() => setInviteRole('member')}
-                                />
-                                Membro
+                        <input type="email" className="form-input" placeholder="E-mail" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} required style={{ marginBottom: '1rem' }} />
+                        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                            <label style={{ fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <input type="radio" checked={inviteRole === 'member'} onChange={() => setInviteRole('member')} /> Membro
                             </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                                <input
-                                    type="radio"
-                                    name="role"
-                                    value="admin"
-                                    checked={inviteRole === 'admin'}
-                                    onChange={() => setInviteRole('admin')}
-                                />
-                                Admin
+                            <label style={{ fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <input type="radio" checked={inviteRole === 'admin'} onChange={() => setInviteRole('admin')} /> Admin
                             </label>
                         </div>
-
-                        <button
-                            type="submit"
-                            className="btn btn-secondary"
-                            disabled={inviteLoading}
-                            style={{ background: 'var(--bg-color)', border: 'none' }}
-                        >
-                            {inviteLoading ? <Loader2 className="loading-spinner" style={{ width: '16px', height: '16px' }} /> : 'Enviar Convite'}
+                        <button type="submit" className="btn btn-secondary" disabled={inviteLoading} style={{ background: 'var(--bg-color)', border: 'none' }}>
+                            {inviteLoading ? 'Enviando...' : 'Enviar Convite'}
                         </button>
-                        {inviteSuccess && <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--success-color)' }}>{inviteSuccess}</p>}
+                        {inviteSuccess && <p style={{ marginTop: '0.5rem', color: 'var(--success-color)', fontSize: '0.85rem' }}>{inviteSuccess}</p>}
                     </form>
                 </div>
             </div>
 
-            {/* Pending Requests List */}
+            {/* Pending Requests */}
             {pendingUsers.length > 0 && (
                 <div style={{ marginBottom: '2rem' }}>
-                    <h3 className="title" style={{ marginBottom: '1rem', color: '#F59E0B' }}>Solicitações Pendentes ({pendingUsers.length})</h3>
-                    <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-                        {pendingUsers.map(user => (
-                            <div key={user.uid} style={{
-                                padding: '1rem 1.5rem',
-                                borderBottom: '1px solid var(--border-color)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                background: 'rgba(245, 158, 11, 0.05)'
-                            }}>
+                    <h3 className="title" style={{ marginBottom: '1rem', color: '#F59E0B', fontSize: '1.4rem' }}>Pendentes ({pendingUsers.length})</h3>
+                    <div className="glass-card" style={{ padding: 0 }}>
+                        {pendingUsers.map(u => (
+                            <div key={u.uid} style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        <UserIcon size={20} color="var(--text-secondary)" />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontWeight: 600 }}>{user.displayName}</div>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{user.email}</div>
-                                    </div>
+                                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UserIcon size={20} /></div>
+                                    <div><div style={{ fontWeight: 600 }}>{u.displayName}</div><div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{u.email}</div></div>
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        onClick={() => handleReject(user.uid)}
-                                        className="btn-secondary"
-                                        style={{ width: 'auto', padding: '0.5rem 1rem', borderColor: 'var(--error-color)', color: 'var(--error-color)' }}
-                                    >
-                                        <XCircle size={18} /> Rejeitar
-                                    </button>
-                                    <button
-                                        onClick={() => handleApprove(user.uid)}
-                                        className="btn-primary"
-                                        style={{ width: 'auto', padding: '0.5rem 1rem', background: 'var(--success-color)' }}
-                                    >
-                                        <CheckCircle size={18} /> Aprovar
-                                    </button>
+                                    <button onClick={() => handleReject(u.uid)} className="btn btn-secondary" style={{ width: 'auto', color: 'var(--error-color)' }}><XCircle size={18} /></button>
+                                    <button onClick={() => handleApprove(u.uid)} className="btn btn-primary" style={{ width: 'auto', background: 'var(--success-color)' }}><CheckCircle size={18} /></button>
                                 </div>
                             </div>
                         ))}
@@ -278,92 +217,109 @@ const UsersModule = () => {
                 </div>
             )}
 
-            {/* Active Users Permission Matrix */}
-            <div>
-                <h3 className="title" style={{ marginBottom: '1rem' }}>Gerenciamento de Permissões</h3>
-                <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}>
-                                <th style={{ textAlign: 'left', padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Usuário</th>
-                                {MODULES.filter(m => !m.adminOnly).map(module => (
-                                    <th key={module.id} style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-                                            <module.icon size={16} />
-                                            {module.name}
-                                        </div>
-                                    </th>
-                                ))}
-                                <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {users.map(user => {
-                                const isAdmin = user.role === 'admin';
-                                return (
-                                    <tr key={user.uid} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                        <td style={{ padding: '1rem 1.5rem' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
-                                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', overflow: 'hidden', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                    {user.photoUrl ? <img src={user.photoUrl} alt="" style={{ width: '100%', height: '100%' }} /> : <UserIcon size={16} />}
-                                                </div>
-                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                        <span style={{ fontWeight: 500 }}>{user.displayName}</span>
-                                                        {isAdmin && <span style={{ fontSize: '0.65rem', background: 'rgba(67, 24, 255, 0.1)', color: 'var(--primary-color)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>DONO</span>}
-                                                    </div>
-                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{user.email}</span>
-                                                </div>
+            {/* Main Table */}
+            <h3 className="title" style={{ marginBottom: '1rem', fontSize: '1.4rem' }}>Membros da Empresa</h3>
+            <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
+                    <thead>
+                        <tr style={{ background: 'var(--bg-color)', borderBottom: '1px solid var(--border-color)' }}>
+                            <th style={{ textAlign: 'left', padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Usuário</th>
+                            <th style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Papel</th>
+                            <th style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Status</th>
+                            {MODULES.filter(m => m.id !== 'dashboard' && !m.superAdminOnly).map(m => (
+                                <th key={m.id} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>{m.name}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {users.map(u => {
+                            const isOwner = u.uid === company?.ownerId;
+                            return (
+                                <tr key={u.uid} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                    <td style={{ padding: '1rem 1.5rem' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                                            <div style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', background: '#ccc' }}>
+                                                {u.photoUrl ? <img src={u.photoUrl} alt="" style={{ width: '100%', height: '100%' }} /> : <UserIcon size={16} style={{ margin: 8 }} />}
                                             </div>
+                                            <div>
+                                                <div style={{ fontWeight: 600 }}>{u.displayName || 'Sem Nome'}</div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{u.email}</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td style={{ textAlign: 'center', padding: '1rem' }}>
+                                        {isOwner ? (
+                                            <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', padding: '2px 8px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.1)', color: '#F59E0B' }}>
+                                                DONO
+                                            </span>
+                                        ) : (
+                                            <select
+                                                disabled={!isCompanyOwner || u.uid === userData?.uid}
+                                                value={u.role || 'member'}
+                                                onChange={async (e) => {
+                                                    const newRole = e.target.value as 'admin' | 'member';
+                                                    if (confirm(`Alterar papel de ${u.displayName} para ${newRole}?`)) {
+                                                        const userRef = doc(db, 'users', u.uid);
+                                                        const memberships = (u.memberships || []).map((ms: any) =>
+                                                            ms.companyId === userData?.companyId ? { ...ms, role: newRole } : ms
+                                                        );
+                                                        await updateDoc(userRef, {
+                                                            role: newRole,
+                                                            memberships: memberships
+                                                        });
+                                                        setUsers(prev => prev.map(usr => usr.uid === u.uid ? { ...usr, role: newRole, memberships: memberships } : usr));
+                                                    }
+                                                }}
+                                                style={{
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: 700,
+                                                    textTransform: 'uppercase',
+                                                    padding: '2px 8px',
+                                                    borderRadius: '4px',
+                                                    border: 'none',
+                                                    background: u.role === 'admin' ? 'rgba(67, 24, 255, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                                                    color: u.role === 'admin' ? 'var(--primary-color)' : 'var(--text-secondary)',
+                                                    cursor: (!isCompanyOwner || u.uid === userData?.uid) ? 'default' : 'pointer'
+                                                }}
+                                            >
+                                                <option value="member">MEMBRO</option>
+                                                <option value="admin">ADMIN</option>
+                                            </select>
+                                        )}
+                                    </td>
+                                    <td style={{ textAlign: 'center', padding: '1rem' }}>
+                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', background: (u.status === 'pending' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(34, 197, 94, 0.1)'), color: (u.status === 'pending' ? '#F59E0B' : 'var(--success-color)') }}>
+                                            {(u.status || 'active').toUpperCase()}
+                                        </span>
+                                    </td>
+
+                                    {MODULES.filter(m => m.id !== 'dashboard' && !m.superAdminOnly).map(m => (
+                                        <td key={m.id} style={{ textAlign: 'center', padding: '1rem' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isOwner || u.allowedModules?.includes(m.id)}
+                                                disabled={isOwner || !isCompanyOwner || u.uid === userData?.uid}
+                                                onChange={(e) => {
+                                                    const checked = e.target.checked;
+                                                    let allowed = u.allowedModules || [];
+                                                    if (checked) allowed = [...new Set([...allowed, m.id])];
+                                                    else allowed = allowed.filter((id: string) => id !== m.id);
+
+                                                    const newMemberships = (u.memberships || []).map((ms: any) => ms.companyId === userData?.companyId ? { ...ms, allowedModules: allowed } : ms);
+                                                    updateDoc(doc(db, 'users', u.uid), {
+                                                        allowedModules: allowed,
+                                                        memberships: newMemberships
+                                                    });
+                                                    setUsers(prev => prev.map(usr => usr.uid === u.uid ? { ...usr, allowedModules: allowed, memberships: newMemberships } : usr));
+                                                }}
+                                            />
                                         </td>
-
-                                        {MODULES.filter(m => !m.adminOnly).map(module => {
-                                            const hasAccess = isAdmin || user.allowedModules?.includes(module.id);
-                                            return (
-                                                <td key={module.id} style={{ textAlign: 'center', padding: '1rem' }}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={hasAccess}
-                                                        disabled={isAdmin} // Admins always have access
-                                                        onChange={(e) => {
-                                                            const isChecked = e.target.checked;
-                                                            let newAllowed = user.allowedModules || [];
-                                                            if (isChecked) {
-                                                                newAllowed = [...new Set([...newAllowed, module.id])];
-                                                            } else {
-                                                                newAllowed = newAllowed.filter((id: string) => id !== module.id);
-                                                            }
-                                                            // Optimistic update locally
-                                                            const updatedUsers = users.map(u => u.uid === user.uid ? { ...u, allowedModules: newAllowed } : u);
-                                                            setUsers(updatedUsers);
-
-                                                            // Persist
-                                                            updateDoc(doc(db, 'users', user.uid), { allowedModules: newAllowed });
-                                                        }}
-                                                        style={{
-                                                            width: '18px',
-                                                            height: '18px',
-                                                            cursor: isAdmin ? 'not-allowed' : 'pointer',
-                                                            accentColor: 'var(--primary-color)'
-                                                        }}
-                                                    />
-                                                </td>
-                                            );
-                                        })}
-
-                                        <td style={{ textAlign: 'center', padding: '1rem' }}>
-                                            {!isAdmin && (
-                                                <button className="btn-secondary" style={{ width: '32px', height: '32px', padding: 0, border: 'none', margin: '0 auto' }}>
-                                                    <MoreVertical size={16} />
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
+                                    ))}
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
             </div>
         </div>
     );

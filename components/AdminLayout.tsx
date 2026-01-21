@@ -1,26 +1,27 @@
 
 import React from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
-import Sidebar from './Sidebar';
-import TopBar from './TopBar';
 import { useAuth } from './AuthContext';
+import AdminSidebar from './AdminSidebar';
+import TopBar from './TopBar';
 
-const AppLayout = () => {
+const AdminLayout = () => {
     const { userData, loading } = useAuth();
 
-    if (loading) return null;
+    if (loading) return (
+        <div style={{ display: 'flex', height: '100vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)' }}>
+            <div className="loading-spinner" style={{ width: '40px', height: '40px', borderTopColor: 'var(--primary-color)' }}></div>
+        </div>
+    );
 
-    if (!userData?.companyId && userData?.role !== 'super_admin') {
-        return <Navigate to="/onboarding" replace />;
-    }
-
-    if (userData?.status === 'pending') {
+    // Strictly enforce Super Admin access
+    if (userData?.role !== 'super_admin') {
         return <Navigate to="/" replace />;
     }
 
     return (
         <div style={{ display: 'flex', minHeight: '100vh', width: '100%', backgroundColor: 'var(--bg-color)' }}>
-            <Sidebar />
+            <AdminSidebar />
 
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
                 <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
@@ -34,4 +35,4 @@ const AppLayout = () => {
     );
 };
 
-export default AppLayout;
+export default AdminLayout;

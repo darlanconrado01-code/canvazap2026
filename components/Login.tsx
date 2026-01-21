@@ -30,28 +30,47 @@ const Login = () => {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                console.log('🔵 Iniciando registro...', { name, email });
 
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                console.log('✅ Usuário criado no Auth:', userCredential.user.uid);
+
+                // Update Firebase Auth profile FIRST
                 await updateProfile(userCredential.user, {
                     displayName: name,
                     photoURL: photoUrl || null
                 });
+                console.log('✅ Profile atualizado no Auth');
 
-                // Create initial user doc
-                await setDoc(doc(db, 'users', userCredential.user.uid), {
+                // Force reload to get updated profile
+                await userCredential.user.reload();
+                console.log('✅ User reloaded, displayName:', userCredential.user.displayName);
+
+                // Create initial user doc in Firestore with explicit values
+                const userData = {
                     uid: userCredential.user.uid,
-                    email: email,
-                    displayName: name,
+                    email: email, // Use the form value directly
+                    displayName: name, // Use the form value directly
                     phone: phone || null,
                     city: city || null,
                     photoUrl: photoUrl || null,
                     companyId: null,
                     role: null,
-                    status: null
-                });
+                    status: null,
+                    createdAt: new Date()
+                };
+
+                console.log('📝 Criando documento no Firestore:', userData);
+
+                await setDoc(doc(db, 'users', userCredential.user.uid), userData);
+                console.log('✅ Documento criado no Firestore');
+
+                // Small delay to ensure Firestore processes the write
+                await new Promise(resolve => setTimeout(resolve, 800));
             }
             navigate('/');
         } catch (err: any) {
+            console.error('❌ Erro no registro:', err);
             if (err.code === 'auth/email-already-in-use') {
                 setError('Este e-mail já está em uso.');
             } else if (err.code === 'auth/invalid-credential') {

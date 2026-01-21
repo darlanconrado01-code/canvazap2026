@@ -10,7 +10,6 @@ import Profile from './components/Profile';
 import AppLayout from './components/AppLayout';
 import ModulePlaceholder from './components/ModulePlaceholder';
 import { auth } from './services/firebaseConfig';
-import { LogOut } from 'lucide-react';
 
 import Dashboard from './components/Dashboard';
 import UsersModule from './components/UsersModule';
@@ -19,11 +18,16 @@ import RequestsModule from './components/RequestsModule';
 import ThemesModule from './components/ThemesModule';
 import FlyersModule from './components/FlyersModule';
 import CompanyProfile from './components/CompanyProfile';
+import Companies from './components/Companies';
+
+// Admin Imports
+import AdminLayout from './components/AdminLayout';
+import AdminDashboard from './components/AdminDashboard';
+import AdminUsers from './components/AdminUsers';
 
 // Protected Route Component
-const ValidateSession = ({ children }: { children: JSX.Element }) => {
-  const { user, loading } = useAuth(); // ... rest of component
-
+const ValidateSession = ({ children }: { children: React.ReactElement }) => {
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -52,14 +56,29 @@ const PendingView = () => (
 );
 
 // Route wrapper for inside the layout
-const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
+const ProtectedRoute = ({ children }: { children: React.ReactElement }) => {
   const { userData, loading } = useAuth();
   if (loading) return null;
+
+  // Super Admins are exempt from companyId check
+  if (userData?.role === 'super_admin') return children;
 
   if (!userData?.companyId) return <Navigate to="/onboarding" />;
   if (userData.status === 'pending') return <PendingView />;
 
   return children;
+};
+
+// Root Redirect Component
+const RootRedirect = () => {
+  const { userData, loading } = useAuth();
+  if (loading) return null;
+
+  if (userData?.role === 'super_admin') {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return <Dashboard />;
 };
 
 
@@ -88,13 +107,25 @@ function App() {
             </ValidateSession>
           } />
 
+          {/* Master Admin Panel - Dedicated Route */}
+          <Route path="/admin" element={
+            <ValidateSession>
+              <AdminLayout />
+            </ValidateSession>
+          }>
+            <Route index element={<AdminDashboard />} />
+            <Route path="empresas" element={<Companies />} />
+            <Route path="usuarios" element={<AdminUsers />} />
+            <Route path="temas" element={<ThemesModule />} />
+          </Route>
+
           {/* App Layout Routes */}
           <Route element={
             <ValidateSession>
               <AppLayout />
             </ValidateSession>
           }>
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/" element={<ProtectedRoute><RootRedirect /></ProtectedRoute>} />
             <Route path="/laminas" element={<ProtectedRoute><ModulePlaceholder title="Lâminas" /></ProtectedRoute>} />
             <Route path="/laminas-plus" element={<ProtectedRoute><ModulePlaceholder title="Lâminas Plus" /></ProtectedRoute>} />
             <Route path="/banco-imagens" element={<ProtectedRoute><ImageBankModule /></ProtectedRoute>} />
