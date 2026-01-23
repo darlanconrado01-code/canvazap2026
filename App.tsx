@@ -3,9 +3,6 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import Login from './components/Login';
-import Onboarding from './components/Onboarding';
-import CreateCompany from './components/CreateCompany';
-import JoinCompany from './components/JoinCompany';
 import Profile from './components/Profile';
 import AppLayout from './components/AppLayout';
 import ModulePlaceholder from './components/ModulePlaceholder';
@@ -19,11 +16,18 @@ import ThemesModule from './components/ThemesModule';
 import FlyersModule from './components/FlyersModule';
 import CompanyProfile from './components/CompanyProfile';
 import Companies from './components/Companies';
+import LaminasModule from './components/LaminasModule';
+import JobVacancyModule from './components/JobVacancyModule';
+import Onboarding from './components/Onboarding';
+import CreateCompany from './components/CreateCompany';
+import JoinCompany from './components/JoinCompany';
 
 // Admin Imports
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './components/AdminDashboard';
 import AdminUsers from './components/AdminUsers';
+import AdminApprovals from './components/AdminApprovals';
+import FirestoreDebug from './components/FirestoreDebug';
 
 // Protected Route Component
 const ValidateSession = ({ children }: { children: React.ReactElement }) => {
@@ -55,15 +59,29 @@ const PendingView = () => (
   </div>
 );
 
+// Redirect to Onboarding instead of showing empty screen
+const NoAccessView = () => <Navigate to="/onboarding" replace />;
+
 // Route wrapper for inside the layout
 const ProtectedRoute = ({ children }: { children: React.ReactElement }) => {
   const { userData, loading } = useAuth();
-  if (loading) return null;
 
-  // Super Admins are exempt from companyId check
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)' }}>
+        <div className="loading-spinner" style={{ width: '40px', height: '40px', borderTopColor: 'var(--primary-color)' }}></div>
+      </div>
+    );
+  }
+
+  // Super Admins are exempt from checks
   if (userData?.role === 'super_admin') return children;
 
-  if (!userData?.companyId) return <Navigate to="/onboarding" />;
+  // If no company and not super admin, redirect to onboarding if not already there
+  if (!userData?.companyId) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
   if (userData.status === 'pending') return <PendingView />;
 
   return children;
@@ -89,23 +107,6 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
 
-          <Route path="/onboarding" element={
-            <ValidateSession>
-              <Onboarding />
-            </ValidateSession>
-          } />
-
-          <Route path="/create-company" element={
-            <ValidateSession>
-              <CreateCompany />
-            </ValidateSession>
-          } />
-
-          <Route path="/join-company" element={
-            <ValidateSession>
-              <JoinCompany />
-            </ValidateSession>
-          } />
 
           {/* Master Admin Panel - Dedicated Route */}
           <Route path="/admin" element={
@@ -116,7 +117,10 @@ function App() {
             <Route index element={<AdminDashboard />} />
             <Route path="empresas" element={<Companies />} />
             <Route path="usuarios" element={<AdminUsers />} />
+            <Route path="aprovacoes" element={<AdminApprovals />} />
+            <Route path="debug" element={<FirestoreDebug />} />
             <Route path="temas" element={<ThemesModule />} />
+            <Route path="solicitacoes" element={<RequestsModule />} />
           </Route>
 
           {/* App Layout Routes */}
@@ -126,8 +130,8 @@ function App() {
             </ValidateSession>
           }>
             <Route path="/" element={<ProtectedRoute><RootRedirect /></ProtectedRoute>} />
-            <Route path="/laminas" element={<ProtectedRoute><ModulePlaceholder title="Lâminas" /></ProtectedRoute>} />
-            <Route path="/laminas-plus" element={<ProtectedRoute><ModulePlaceholder title="Lâminas Plus" /></ProtectedRoute>} />
+            <Route path="/laminas" element={<ProtectedRoute><LaminasModule /></ProtectedRoute>} />
+            <Route path="/artes-vagas" element={<ProtectedRoute><JobVacancyModule /></ProtectedRoute>} />
             <Route path="/banco-imagens" element={<ProtectedRoute><ImageBankModule /></ProtectedRoute>} />
             <Route path="/encartes" element={<ProtectedRoute><FlyersModule /></ProtectedRoute>} />
             <Route path="/company-profile" element={<ProtectedRoute><CompanyProfile /></ProtectedRoute>} />
@@ -138,6 +142,13 @@ function App() {
             <Route path="/solicitacoes" element={<ProtectedRoute><RequestsModule /></ProtectedRoute>} />
           </Route>
 
+          {/* Onboarding Routes */}
+          <Route path="/onboarding" element={<ValidateSession><Onboarding /></ValidateSession>} />
+          <Route path="/create-company" element={<ValidateSession><CreateCompany /></ValidateSession>} />
+          <Route path="/join-company" element={<ValidateSession><JoinCompany /></ValidateSession>} />
+
+          {/* Catch-all redirect to home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     </AuthProvider>

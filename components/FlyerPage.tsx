@@ -47,9 +47,17 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
             {theme?.backgroundEncartes && (
                 <img
                     src={theme.backgroundEncartes}
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'stretch', zIndex: 0 }}
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        zIndex: 0
+                    }}
                     alt="Background"
-                    crossOrigin={crossOrigin}
+                    crossOrigin={theme.backgroundEncartes.startsWith('data:') ? undefined : crossOrigin}
                 />
             )}
 
@@ -61,14 +69,15 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                         position: 'absolute',
                         left: `${layoutConfig.logoConfig.x}%`,
                         top: `${layoutConfig.logoConfig.y}px`,
-                        width: '150px',
+                        width: 'auto',
+                        maxHeight: '120px',
                         transform: `scale(${layoutConfig.logoConfig.scale})`,
                         transformOrigin: 'center',
-                        zIndex: 3,
+                        zIndex: 50,
                         pointerEvents: 'none'
                     }}
                     alt="Logo da Empresa"
-                    crossOrigin={crossOrigin}
+                    crossOrigin={companyLogoUrl.startsWith('data:') ? undefined : crossOrigin}
                 />
             )}
 
@@ -83,7 +92,7 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                     color: layoutConfig.sideTextConfig.color,
                     fontWeight: 'bold',
                     whiteSpace: 'nowrap',
-                    zIndex: 2,
+                    zIndex: 40,
                     transformOrigin: 'center'
                 }}>
                     {layoutConfig.sideTextConfig.text}
@@ -93,10 +102,10 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
             {/* Grid Content */}
             <div style={{
                 position: 'absolute',
-                top: layoutConfig.marginTop,
-                bottom: layoutConfig.marginBottom,
-                left: layoutConfig.marginLeft,
-                right: layoutConfig.marginRight,
+                top: `${layoutConfig.marginTop}px`,
+                bottom: `${layoutConfig.marginBottom}px`,
+                left: `${layoutConfig.marginLeft}px`,
+                right: `${layoutConfig.marginRight}px`,
                 zIndex: 1,
                 display: 'grid',
                 gridTemplateColumns: `repeat(${layoutConfig.columns}, 1fr)`,
@@ -123,6 +132,7 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                             background: cardBgString,
                             backdropFilter: backdropFilter,
                             borderRadius: `${layoutConfig.cardRadius}px`,
+                            boxShadow: layoutConfig.cardBackgroundMode !== 'none' ? '0 4px 15px rgba(0,0,0,0.12)' : 'none',
                             padding: `${layoutConfig.cardPadding}px`,
                             display: 'flex',
                             flexDirection: 'column',
@@ -130,35 +140,26 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                             justifyContent: 'center',
                         }}>
 
-                            {/* Product Image Area */}
                             <div style={{
-                                flex: 1,
                                 width: '100%',
                                 marginBottom: `${layoutConfig.spacingBelowPhoto}px`,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                overflow: 'hidden',
-                                minHeight: 0
+                                position: 'relative',
+                                // Este é o hack definitivo para manter proporção 1:1 independente do conteúdo
+                                height: 0,
+                                paddingBottom: '100%',
                             }}>
                                 <div style={{
-                                    aspectRatio: '1 / 1',
+                                    position: 'absolute',
+                                    top: `${(1 - layoutConfig.photoScale) * 50}%`,
+                                    left: `${(1 - layoutConfig.photoScale) * 50}%`,
                                     width: `${layoutConfig.photoScale * 100}%`,
-                                    height: 'auto',
-                                    maxHeight: '100%',
-                                    maxWidth: '100%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    transition: 'all 0.2s ease',
-                                    margin: '0 auto'
+                                    height: `${layoutConfig.photoScale * 100}%`,
                                 }}>
                                     <SmartImage
                                         urls={product.candidateUrls}
                                         style={{
                                             width: '100%',
                                             height: '100%',
-                                            objectFit: 'contain'
                                         }}
                                         crossOrigin={crossOrigin}
                                         fallback={
@@ -170,62 +171,67 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                                 </div>
                             </div>
 
-                            <div style={{
-                                marginBottom: `${layoutConfig.spacingBelowDescription}px`,
-                                textAlign: 'center',
-                                width: '100%',
-                                fontSize: `${layoutConfig.fontSizeDescription}rem`,
-                                color: layoutConfig.colorDescription,
-                                lineHeight: '1.2',
-                                fontWeight: 500,
-                            }}>
-                                {product.description}
-                            </div>
-
-                            {/* Price */}
-                            <div style={{
-                                marginTop: `${layoutConfig.spacingAbovePrice}px`,
-                                color: layoutConfig.colorPrice,
-                                fontWeight: 800,
-                                fontSize: `${layoutConfig.fontSizePrice}rem`,
-                                textAlign: 'center',
-                                lineHeight: 1,
-                                position: 'relative',
-                                display: 'inline-block' // Needed for seal positioning if we were to put it relative to text
-                            }}>
-                                {product.price}
-                                {/* Price Seal (Badge) */}
-                                {layoutConfig.showPriceSeal && theme?.priceSealUrl && (
-                                    <img
-                                        src={theme.priceSealUrl}
-                                        style={{
-                                            position: 'absolute',
-                                            top: '-80%',
-                                            right: '-80%',
-                                            height: '250%',
-                                            width: 'auto',
-                                            pointerEvents: 'none',
-                                            zIndex: -1,
-                                            opacity: 1
-                                        }}
-                                        alt="Selo de Preço"
-                                        crossOrigin={crossOrigin}
-                                    />
-                                )}
-                            </div>
-
-                            {/* Codes */}
-                            <div style={{ marginTop: '4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                {layoutConfig.showInternalCode && product.internalCode && (
-                                    <div style={{ fontSize: `${layoutConfig.fontInternalCode}rem`, color: layoutConfig.colorInternalCode }}>
-                                        Cód: {product.internalCode}
-                                    </div>
-                                )}
-                                {layoutConfig.showEan && product.ean && (
-                                    <div style={{ fontSize: `${layoutConfig.fontEan}rem`, color: layoutConfig.colorEan }}>
-                                        EAN: {product.ean}
-                                    </div>
-                                )}
+                            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                {(layoutConfig.elementsOrder || ['code', 'description', 'price']).map(element => {
+                                    if (element === 'code') {
+                                        return (
+                                            <div key="codes" style={{
+                                                marginBottom: '4px',
+                                                textAlign: 'center',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                gap: '2px'
+                                            }}>
+                                                {layoutConfig.showInternalCode && product.internalCode && (
+                                                    <div style={{ fontSize: `${layoutConfig.fontInternalCode}rem`, color: layoutConfig.colorInternalCode }}>
+                                                        Cód: {product.internalCode}
+                                                    </div>
+                                                )}
+                                                {layoutConfig.showEan && product.ean && (
+                                                    <div style={{ fontSize: `${layoutConfig.fontEan}rem`, color: layoutConfig.colorEan }}>
+                                                        EAN: {product.ean}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    }
+                                    if (element === 'description') {
+                                        return (
+                                            <div key="desc" style={{
+                                                marginBottom: `${layoutConfig.spacingBelowDescription}px`,
+                                                textAlign: 'center',
+                                                width: '100%',
+                                                fontSize: `${layoutConfig.fontSizeDescription}rem`,
+                                                color: layoutConfig.colorDescription,
+                                                lineHeight: '1.2',
+                                                fontWeight: 500,
+                                            }}>
+                                                {product.description}
+                                            </div>
+                                        );
+                                    }
+                                    if (element === 'price' && product.price) {
+                                        return (
+                                            <div key="price" style={{
+                                                marginTop: `${layoutConfig.spacingAbovePrice}px`,
+                                                color: layoutConfig.colorPrice,
+                                                fontWeight: 800,
+                                                fontSize: `${layoutConfig.fontSizePrice}rem`,
+                                                textAlign: 'center',
+                                                lineHeight: 1,
+                                                position: 'relative',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                padding: '4px 12px'
+                                            }}>
+                                                <span style={{ position: 'relative', zIndex: 2 }}>{product.price}</span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })}
                             </div>
 
                         </div>

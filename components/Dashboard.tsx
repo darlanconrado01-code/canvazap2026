@@ -20,13 +20,20 @@ const Dashboard = () => {
     activeUsers: 0,
     pendingUsers: 0
   });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchStats = async () => {
-      if (!userData?.companyId) return;
+      if (!userData?.companyId) {
+        setLoading(false);
+        return;
+      }
 
+      setLoading(true);
+      setError(null);
       try {
         // Company Info
         const companyDoc = await getDoc(doc(db, 'companies', userData.companyId));
@@ -46,8 +53,16 @@ const Dashboard = () => {
           pendingUsers: pendingSnap.data().count
         });
 
-      } catch (error) {
-        console.error("Error fetching dashboard stats:", error);
+      } catch (e: any) {
+        console.error("FIRESTORE ERROR (Dashboard)", {
+          code: e?.code,
+          message: e?.message,
+          companyId: userData.companyId,
+          uid: userData.uid
+        });
+        setError(e);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -63,9 +78,29 @@ const Dashboard = () => {
   };
 
   const isAdmin = userData?.role === 'admin';
+  const isSuperAdmin = userData?.role === 'super_admin';
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', height: '300px', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="loading-spinner"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', border: '1px solid var(--error-color)' }}>
+        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⚠️</div>
+        <h3 style={{ color: 'var(--error-color)' }}>Erro ao carregar Dashboard</h3>
+        <p style={{ color: 'var(--text-secondary)' }}>{error.code}: {error.message}</p>
+        <button onClick={() => window.location.reload()} className="btn btn-secondary" style={{ marginTop: '1rem' }}>Tentar Novamente</button>
+      </div>
+    );
+  }
 
   // Check if company is inactive - show support message
-  if (company && company.status === 'inactive') {
+  if (company && company.status === 'inactive' && !isSuperAdmin) {
     const whatsappMessage = encodeURIComponent(
       `Olá, acabei de criar minha Empresa no sistema e gostaria de ativá-la.\n\nEmpresa: ${company.name}\nCódigo: ${company.code}\nMeu e-mail é: ${userData?.email}`
     );
@@ -218,7 +253,7 @@ const Dashboard = () => {
 
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', background: 'var(--bg-color)', padding: '1rem', borderRadius: '12px', marginBottom: '1rem' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Código da Empresa</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>Código da Empresa</div>
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '1px', color: 'var(--primary-color)' }}>{company?.code}</div>
               </div>
               <div style={{ width: '1px', height: '40px', background: 'var(--border-color)' }}></div>

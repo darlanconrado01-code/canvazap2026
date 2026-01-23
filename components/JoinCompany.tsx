@@ -75,10 +75,10 @@ const JoinCompany = () => {
 
             await updateDoc(userDocRef, {
                 memberships: arrayUnion(newMembership),
-                // If it's the very first one, set as current context? 
-                // Let's decide later. For now, we just add entitlement.
-                // If user has NO current company, maybe set this one as current pending?
-                ...(!userData?.currentCompanyId ? { currentCompanyId: companyId } : {})
+                companyId: companyId,
+                currentCompanyId: companyId, // Force update context
+                status: 'pending',
+                role: 'member'
             });
 
             await refreshUserData();

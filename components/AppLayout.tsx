@@ -10,14 +10,6 @@ const AppLayout = () => {
 
     if (loading) return null;
 
-    if (!userData?.companyId && userData?.role !== 'super_admin') {
-        return <Navigate to="/onboarding" replace />;
-    }
-
-    if (userData?.status === 'pending') {
-        return <Navigate to="/" replace />;
-    }
-
     return (
         <div style={{ display: 'flex', minHeight: '100vh', width: '100%', backgroundColor: 'var(--bg-color)' }}>
             <Sidebar />

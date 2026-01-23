@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
-import { db } from '../services/firebaseConfig';
+import { db, auth } from '../services/firebaseConfig';
 import { collection, getDocs, getCountFromServer } from 'firebase/firestore';
 import {
     Users,
@@ -20,6 +20,7 @@ const AdminDashboard = () => {
     });
     const [companies, setCompanies] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<any>(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -35,8 +36,13 @@ const AdminDashboard = () => {
                     totalCompanies: companiesData.length,
                     activeUsers: usersSnap.data().count
                 });
-            } catch (error) {
-                console.error("Error fetching global stats:", error);
+            } catch (e: any) {
+                console.error("FIRESTORE ERROR (fetchStats AdminDashboard)", {
+                    code: e?.code,
+                    message: e?.message,
+                    uid: auth.currentUser?.uid
+                });
+                setError(e);
             } finally {
                 setLoading(false);
             }
@@ -44,6 +50,17 @@ const AdminDashboard = () => {
 
         fetchStats();
     }, [userData]);
+
+    if (error) {
+        return (
+            <div className="glass-card" style={{ padding: '2rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>❌</div>
+                <h3>Erro de Conexão Firestore</h3>
+                <p style={{ color: 'var(--text-secondary)' }}>{error.code}: {error.message}</p>
+                <button onClick={() => window.location.reload()} className="btn btn-primary" style={{ marginTop: '1rem', width: 'auto', padding: '0.5rem 1.5rem' }}>Recarregar</button>
+            </div>
+        );
+    }
 
     return (
         <div className="fade-in">

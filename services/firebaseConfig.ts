@@ -1,8 +1,13 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, setLogLevel } from "firebase/firestore";
 import { getAnalytics } from "firebase/analytics";
 import { getStorage } from "firebase/storage";
+
+// Enable only error logging for production troubleshooting
+if (typeof window !== 'undefined') {
+    setLogLevel("error");
+}
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -11,16 +16,16 @@ const firebaseConfig = {
     storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
-    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+    // measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-// Debug: Log config in development (remove in production)
-if (import.meta.env.DEV) {
-    console.log('Firebase Config:', {
-        ...firebaseConfig,
-        apiKey: firebaseConfig.apiKey ? '***' + firebaseConfig.apiKey.slice(-4) : 'MISSING'
-    });
-}
+// Debug: Log config to help identify environment issues
+console.log('🔥 FIREBASE ENV CHECK:', {
+    projectId: firebaseConfig.projectId,
+    authDomain: firebaseConfig.authDomain,
+    appId: firebaseConfig.appId,
+    env: import.meta.env.MODE
+});
 
 // Validate required fields
 const requiredFields = ['apiKey', 'authDomain', 'projectId', 'appId'];
@@ -36,8 +41,9 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-// Only initialize analytics in browser environment
-let analytics;
+// Analytics disabled to prevent initialization hangs in production
+let analytics: any = null;
+/*
 if (typeof window !== 'undefined') {
     try {
         analytics = getAnalytics(app);
@@ -45,4 +51,5 @@ if (typeof window !== 'undefined') {
         console.warn('Analytics initialization failed:', error);
     }
 }
+*/
 export { analytics };

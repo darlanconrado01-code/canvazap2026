@@ -73,7 +73,20 @@ const UsersModule = () => {
 
     const handleApprove = async (uid: string) => {
         try {
-            await updateDoc(doc(db, 'users', uid), { status: 'active' });
+            const userRef = doc(db, 'users', uid);
+            const userSnap = await getDoc(userRef);
+            if (!userSnap.exists()) return;
+            const uData = userSnap.data();
+
+            // Update memberships array
+            const newMemberships = (uData.memberships || []).map((m: any) =>
+                m.companyId === userData?.companyId ? { ...m, status: 'active' } : m
+            );
+
+            await updateDoc(userRef, {
+                status: 'active',
+                memberships: newMemberships
+            });
             fetchData();
         } catch (error) {
             console.error(error);
@@ -82,10 +95,22 @@ const UsersModule = () => {
 
     const handleReject = async (uid: string) => {
         try {
-            await updateDoc(doc(db, 'users', uid), {
+            const userRef = doc(db, 'users', uid);
+            const userSnap = await getDoc(userRef);
+            if (!userSnap.exists()) return;
+            const uData = userSnap.data();
+
+            // Remove from memberships array or set status to rejected?
+            // Usually we just remove if rejected during join
+            const newMemberships = (uData.memberships || []).filter((m: any) =>
+                m.companyId !== userData?.companyId
+            );
+
+            await updateDoc(userRef, {
                 companyId: null,
                 status: null,
-                role: null
+                role: null,
+                memberships: newMemberships
             });
             fetchData();
         } catch (error) {
@@ -226,7 +251,11 @@ const UsersModule = () => {
                             <th style={{ textAlign: 'left', padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Usuário</th>
                             <th style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Papel</th>
                             <th style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Status</th>
-                            {MODULES.filter(m => m.id !== 'dashboard' && !m.superAdminOnly).map(m => (
+                            {MODULES.filter(m =>
+                                m.id !== 'dashboard' &&
+                                !m.superAdminOnly &&
+                                userData?.companyModules?.includes(m.id)
+                            ).map(m => (
                                 <th key={m.id} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>{m.name}</th>
                             ))}
                         </tr>
@@ -293,7 +322,11 @@ const UsersModule = () => {
                                         </span>
                                     </td>
 
-                                    {MODULES.filter(m => m.id !== 'dashboard' && !m.superAdminOnly).map(m => (
+                                    {MODULES.filter(m =>
+                                        m.id !== 'dashboard' &&
+                                        !m.superAdminOnly &&
+                                        userData?.companyModules?.includes(m.id)
+                                    ).map(m => (
                                         <td key={m.id} style={{ textAlign: 'center', padding: '1rem' }}>
                                             <input
                                                 type="checkbox"

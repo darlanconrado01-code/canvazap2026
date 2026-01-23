@@ -2,8 +2,13 @@ export interface Theme {
     id: string;
     name: string;
     backgroundEncartes: string;
-    priceSealUrl: string;
-    availability: string[];
+    coverUrl?: string;
+    isActive?: boolean;
+    availability: string[]; // 'encartes', 'catalogo'
+    tags?: string[];
+    isPublic?: boolean;
+    companyId?: string;
+    allowedCompanies?: string[];
     defaultLayoutConfig?: any; // Stores the saved layout configuration
 }
 
@@ -68,4 +73,5 @@ export interface LayoutConfig {
         rotation: number;
         visible: boolean;
     };
+    elementsOrder?: string[];
 }

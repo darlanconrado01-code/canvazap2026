@@ -16,7 +16,7 @@ const MENU_GROUPS = [
     },
     {
         title: 'Artes & Mídia',
-        items: ['laminas', 'laminas-plus', 'encartes', 'banco-imagens', 'temas']
+        items: ['laminas', 'artes-vagas', 'encartes', 'banco-imagens', 'temas']
     },
     {
         title: 'Administrativo',

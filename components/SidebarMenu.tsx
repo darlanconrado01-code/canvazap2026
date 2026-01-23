@@ -15,7 +15,7 @@ import {
 export const MODULES = [
     { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, path: '/' },
     { id: 'laminas', name: 'Lâminas', icon: FileImage, path: '/laminas' },
-    { id: 'laminas-plus', name: 'Lâminas Plus', icon: Layers, path: '/laminas-plus' },
+    { id: 'artes-vagas', name: 'Artes Vagas', icon: Layers, path: '/artes-vagas' },
     { id: 'banco-imagens', name: 'Banco de Imagens', icon: Image, path: '/banco-imagens' },
     { id: 'encartes', name: 'Encartes', icon: BookOpen, path: '/encartes' },
     { id: 'crachas', name: 'Crachás', icon: CreditCard, path: '/crachas' },

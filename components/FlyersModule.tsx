@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/firebaseConfig';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, setDoc, writeBatch, arrayUnion, limit } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 import {
     Layout,
@@ -11,6 +11,7 @@ import {
     Grid,
     Layers,
     Search,
+    Plus,
     AlertCircle,
     ChevronLeft,
     ChevronsLeft,
@@ -23,7 +24,10 @@ import {
     Save,
     AlertTriangle,
     Copy,
-    ChevronDown // Added for dropdown
+    ChevronDown,
+    ImagePlus,
+    Loader2,
+    Check
 } from 'lucide-react';
 import { Theme, ProductItem, LayoutConfig } from './FlyerTypes';
 import { FlyerPage } from './FlyerPage';
@@ -45,11 +49,16 @@ const FlyersModule = () => {
     // Inputs
     const [inputText, setInputText] = useState('');
     const [products, setProducts] = useState<ProductItem[]>([]);
+    const [productSearchTerm, setProductSearchTerm] = useState('');
+    const [globalSearch, setGlobalSearch] = useState('');
+    const [globalResults, setGlobalResults] = useState<any[]>([]);
+    const [searchingGlobal, setSearchingGlobal] = useState(false);
 
     // Theme
     const [themes, setThemes] = useState<Theme[]>([]);
     const [selectedTheme, setSelectedTheme] = useState<Theme | null>(null);
     const [loadingThemes, setLoadingThemes] = useState(false);
+    const [themeSearch, setThemeSearch] = useState('');
 
     // Layout Config
     const [layoutConfig, setLayoutConfig] = useState({
@@ -108,320 +117,12 @@ const FlyersModule = () => {
             scale: 1,
             rotation: -90,
             visible: true
-        }
+        },
+        elementsOrder: ['code', 'description', 'price']
     });
 
     const productsProcessedRef = useRef(false);
-
     const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (userData?.companyId) {
-            fetchThemes();
-            fetchCompanyLogo();
-        }
-    }, [userData]);
-
-    const fetchCompanyLogo = async () => {
-        if (!userData?.companyId) return;
-        try {
-            const docRef = doc(db, 'companies', userData.companyId);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                setCompanyLogoUrl(docSnap.data().logoUrl || null);
-            }
-        } catch (e) {
-            console.error("Error fetching company logo", e);
-        }
-    };
-
-    const fetchThemes = async () => {
-        setLoadingThemes(true);
-        try {
-            // Fetch themes available for 'encartes'
-            const q = query(collection(db, 'themes'), where('availability', 'array-contains', 'encartes'));
-            // Note: In real app we also need to filter by companyId or isPublic. 
-            // For prototype simplifying to just checking availability and then filtering in memory if needed or improving query.
-            const snapshot = await getDocs(q);
-
-            const fetchedThemes: Theme[] = [];
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                if (data.isPublic || data.companyId === userData?.companyId) {
-                    fetchedThemes.push({ id: doc.id, ...data } as Theme);
-                }
-            });
-
-            setThemes(fetchedThemes);
-            if (fetchedThemes.length > 0) {
-                setSelectedTheme(fetchedThemes[0]);
-            }
-        } catch (error) {
-            console.error("Error fetching themes:", error);
-        } finally {
-            setLoadingThemes(false);
-        }
-    };
-
-    useEffect(() => {
-        if (selectedTheme && selectedTheme.defaultLayoutConfig) {
-            // Merge with defaults to ensure all keys exist even if user has an old config
-            setLayoutConfig(prev => ({ ...prev, ...selectedTheme.defaultLayoutConfig }));
-        }
-    }, [selectedTheme]);
-
-    const handleSaveThemeConfig = async () => {
-        if (!selectedTheme) return;
-
-        // Safety check: Don't let users edit public themes if they are not admin (simplified here by assumes user can edit if they see the button OR we check ownership)
-        // In this prototype, we'll allow saving if it's the selected theme. 
-        // Ideally we should check if data.companyId === userData.companyId
-
-        try {
-            const themeRef = doc(db, 'themes', selectedTheme.id);
-            await updateDoc(themeRef, {
-                defaultLayoutConfig: layoutConfig
-            });
-
-            // Update local state
-            setSelectedTheme(prev => prev ? { ...prev, defaultLayoutConfig: layoutConfig } : null);
-            setThemes(prev => prev.map(t => t.id === selectedTheme.id ? { ...t, defaultLayoutConfig: layoutConfig } : t));
-
-            alert('Configurações salvas no tema com sucesso!');
-        } catch (error) {
-            console.error("Erro ao salvar configurações do tema:", error);
-            alert('Erro ao salvar configurações.');
-        }
-    };
-
-    const handleDuplicateTheme = async (e: React.MouseEvent, theme: Theme) => {
-        e.stopPropagation(); // Prevent selection
-        if (userData?.role !== 'admin' || !userData?.companyId) return;
-
-        if (!confirm('Deseja duplicar este tema? As configurações serão mantidas, mas sem as imagens de fundo.')) return;
-
-        try {
-            const newThemeData = {
-                name: `${theme.name} (Cópia)`,
-                companyId: userData.companyId,
-                availability: theme.availability || ['encartes'],
-                backgroundEncartes: '', // Clear images as requested
-                priceSealUrl: '',
-                defaultLayoutConfig: theme.defaultLayoutConfig || {},
-                isPublic: false,
-                createdAt: new Date().toISOString()
-            };
-
-            await addDoc(collection(db, 'themes'), newThemeData);
-            alert('Tema duplicado com sucesso!');
-            fetchThemes(); // Refresh list
-        } catch (error) {
-            console.error("Erro ao duplicar tema:", error);
-            alert('Erro ao duplicar tema.');
-        }
-    };
-
-    const [showDownloadMenu, setShowDownloadMenu] = useState(false);
-    const [isExporting, setIsExporting] = useState(false);
-    const orchestratorRef = useRef<FlyerExportOrchestratorRef>(null);
-
-    // Export Logic
-    const handleExport = (type: 'jpg-current' | 'jpg-all' | 'pdf-current' | 'pdf-all') => {
-        if (!orchestratorRef.current) {
-            alert('Aguarde o carregamento do módulo de exportação.');
-            return;
-        }
-
-        setShowDownloadMenu(false);
-
-        switch (type) {
-            case 'jpg-current':
-                orchestratorRef.current.exportCurrentPageJpg(currentPreviewPage);
-                break;
-            case 'jpg-all':
-                orchestratorRef.current.exportAllPagesJpgZip();
-                break;
-            case 'pdf-current':
-                orchestratorRef.current.exportCurrentPagePdf(currentPreviewPage);
-                break;
-            case 'pdf-all':
-                orchestratorRef.current.exportAllPagesPdf();
-                break;
-        }
-    };
-
-    // Parse Text Input
-    const processInput = async () => {
-        if (!inputText.trim()) return;
-
-        const lines = inputText.split('\n').filter(l => l.trim());
-        const newProducts: ProductItem[] = lines.map((line, index) => {
-            let description = line;
-            let price = '';
-            let ean = '';
-            let internalCode = '';
-
-            // 1. Extract Price (R$ XX,XX or XX,XX)
-            const priceMatch = line.match(/(?:R\$\s*)?(\d+[.,]\d{2})(?!\d)/);
-            if (priceMatch) {
-                price = priceMatch[0];
-                description = description.replace(priceMatch[0], '').trim();
-            }
-
-            // 2. Extract Identifier (EAN or Internal Code)
-            const ean13Match = line.match(/(\d{8,14})/);
-            const startCodeMatch = line.match(/^(\d+)/);
-
-            if (ean13Match) {
-                ean = ean13Match[0];
-                description = description.replace(ean, '').trim();
-            }
-
-            if (startCodeMatch) {
-                const possibleCode = startCodeMatch[0];
-                // If the start code matches the found EAN, then it's just the EAN
-                // Otherwise (or if no EAN found), it's the internal code
-                if (possibleCode !== ean) {
-                    internalCode = possibleCode;
-                    description = description.replace(new RegExp(`^${internalCode}`), '').trim();
-                }
-            }
-
-            // Clean description
-            description = description.replace(/^[-–\s]+|[-–\s]+$/g, '').trim();
-
-            const candidates: string[] = [];
-            // Optimistically add external sources if EAN is valid
-            if (ean) {
-                // Priority A: CanvaZap
-                candidates.push(`http://imagens.canvazap.com.br/codbarras/${ean}.png`);
-                // Priority B: Bluesoft Cosmos
-                candidates.push(`http://cdn-cosmos.bluesoft.com.br/products/${ean}`);
-            }
-
-            return {
-                id: `p-${Date.now()}-${index}`,
-                rawText: line,
-                description: description || 'Sem descrição',
-                price: price || 'R$ 0,00',
-                ean, // May be empty
-                internalCode, // New field for internal code
-                candidateUrls: candidates,
-                loadingFirestore: true,
-                isLinked: !!ean // True if we have an EAN, otherwise false (needs lookup)
-            };
-        });
-
-        setProducts(newProducts);
-        setActiveTab('theme'); // Auto advance
-        setCurrentPreviewPage(0); // Reset page
-
-        // Async: Check Firestore for each product
-        for (let i = 0; i < newProducts.length; i++) {
-            checkFirestoreForProduct(newProducts[i], i);
-        }
-    };
-
-    const checkFirestoreForProduct = async (product: ProductItem, index: number) => {
-        try {
-            let foundData: any = null;
-            let resolvedEan = product.ean;
-
-            // 1. If we don't have an EAN, try to find it in 'product_mappings' (Company specific Code -> EAN)
-            if (!resolvedEan && product.internalCode && userData?.companyId) {
-                try {
-                    const qMap = query(collection(db, 'product_mappings'),
-                        where('companyId', '==', userData.companyId),
-                        where('internalCode', '==', product.internalCode)
-                    );
-                    const snapMap = await getDocs(qMap);
-                    if (!snapMap.empty) {
-                        const mapData = snapMap.docs[0].data();
-                        if (mapData.ean) {
-                            resolvedEan = mapData.ean;
-                        }
-                    }
-                } catch (err) {
-                    console.error("Error checking mappings", err);
-                }
-            }
-
-            // 2. Search for Image Data
-            // Basic constraints (always filter by companyId if looking for private records)
-            const baseConstraints = [];
-            if (userData?.companyId) {
-                baseConstraints.push(where('companyId', '==', userData.companyId));
-            }
-
-            // A. Search by EAN (global or local)
-            if (resolvedEan) {
-                // First try strictly global/public or just by EAN without company constraint?
-                // For now, let's keep it simple: Look for ANY record with this EAN first.
-                // If the user system relies on private products, we might need companyId. 
-                // But usually, an image bank is shared.
-                const qEan = query(collection(db, 'products'), where('ean', '==', resolvedEan));
-                const snapEan = await getDocs(qEan);
-                if (!snapEan.empty) {
-                    foundData = snapEan.docs[0].data();
-                } else {
-                    // If not found globally, try with companyId constraint in case it's strictly private?
-                    // Actually logic above covers 'any'. SnapEan covers both private and public if companyId is just a field.
-                }
-            }
-            // B. Fallback: Search by Internal Code (Private items only)
-            else if (product.internalCode) {
-                const qCode = query(collection(db, 'products'), where('internalCode', '==', product.internalCode), ...baseConstraints);
-                const snapCode = await getDocs(qCode);
-                if (!snapCode.empty) foundData = snapCode.docs[0].data();
-            }
-
-            // 3. Update State
-            setProducts(prev => {
-                const next = [...prev];
-                if (next[index]) {
-                    // Determine Final EAN
-                    const finalEan = next[index].ean || resolvedEan || (foundData ? foundData.ean : undefined);
-
-                    // Helper to build candidates
-                    let newCandidates = [...next[index].candidateUrls];
-
-                    // Add DB Image URL
-                    if (foundData && foundData.imageUrl && !newCandidates.includes(foundData.imageUrl)) {
-                        newCandidates.push(foundData.imageUrl); // Push to end (fallback)
-                    }
-
-                    // Add External Sources if we have EAN now
-                    if (finalEan) {
-                        const ext1 = `http://cdn-cosmos.bluesoft.com.br/products/${finalEan}`;
-                        const ext2 = `http://imagens.canvazap.com.br/codbarras/${finalEan}.png`;
-
-                        if (!newCandidates.includes(ext1)) newCandidates.unshift(ext1);
-                        if (!newCandidates.includes(ext2)) newCandidates.unshift(ext2);
-                    }
-
-                    next[index] = {
-                        ...next[index],
-                        ean: finalEan,
-                        candidateUrls: newCandidates,
-                        loadingFirestore: false,
-                        isLinked: !!finalEan // Linked if we have EAN
-                    };
-                }
-                return next;
-            });
-
-        } catch (e) {
-            console.error("Firestore lookup failed", e);
-            setProducts(prev => {
-                const next = [...prev];
-                if (next[index]) {
-                    next[index] = { ...next[index], loadingFirestore: false };
-                }
-                return next;
-            });
-        }
-    };
-
     const [currentPreviewPage, setCurrentPreviewPage] = useState(0);
     const [zoomLevel, setZoomLevel] = useState(0.5);
 
@@ -447,71 +148,433 @@ const FlyersModule = () => {
         });
     };
 
-    const searchImageForProduct = async (product: ProductItem, index: number) => {
+    useEffect(() => {
+        if (userData?.companyId) {
+            fetchThemes();
+            fetchCompanyLogo();
+        }
+    }, [userData]);
+
+    const fetchCompanyLogo = async () => {
+        if (!userData?.companyId) return;
         try {
-            let imageUrl = '';
-            let source: 'bank' | 'request' | 'upload' = 'request';
+            const docRef = doc(db, 'companies', userData.companyId);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                setCompanyLogoUrl(docSnap.data().logoUrl || null);
+            }
+        } catch (e) {
+            console.error("Error fetching company logo", e);
+        }
+    };
 
-            // 1. Check External Sources if EAN exists
-            if (product.ean) {
-                // Priority A: CanvaZap
-                const canvaZapUrl = `http://imagens.canvazap.com.br/codbarras/${product.ean}.png`;
-                const canvaZapExists = await checkImageExists(canvaZapUrl);
+    const handleGlobalSearch = async (val: string) => {
+        setGlobalSearch(val);
+        if (val.length < 3) {
+            setGlobalResults([]);
+            return;
+        }
 
-                if (canvaZapExists) {
-                    imageUrl = canvaZapUrl;
-                    source = 'bank';
-                } else {
-                    // Priority B: Bluesoft Cosmos
-                    const bluesoftUrl = `http://cdn-cosmos.bluesoft.com.br/products/${product.ean}`;
-                    const bluesoftExists = await checkImageExists(bluesoftUrl);
-                    if (bluesoftExists) {
-                        imageUrl = bluesoftUrl;
-                        source = 'bank';
+        setSearchingGlobal(true);
+        try {
+            // Search in global products
+            const q = query(collection(db, 'products'), limit(10));
+            const snap = await getDocs(q);
+
+            // Client side filter for name or ean
+            const term = val.toLowerCase();
+            const results = snap.docs
+                .map(doc => doc.data())
+                .filter(p =>
+                    p.name?.toLowerCase().includes(term) ||
+                    p.ean?.includes(term)
+                );
+
+            setGlobalResults(results);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setSearchingGlobal(false);
+        }
+    };
+
+    const addProductToList = (p: any) => {
+        const textToAdd = `${p.ean || ''} ${p.name || ''} R$ 0,00\n`;
+        setInputText(prev => prev + (prev.endsWith('\n') || !prev ? '' : '\n') + textToAdd);
+        setGlobalSearch('');
+        setGlobalResults([]);
+    };
+
+    const fetchThemes = async () => {
+        setLoadingThemes(true);
+        try {
+            const themesRef = collection(db, 'themes');
+            const q = query(themesRef, where('availability', 'array-contains', 'encartes'));
+            const snapshot = await getDocs(q);
+
+            const fetchedThemes: Theme[] = [];
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const isActive = data.isActive !== false;
+                const isPublic = data.isPublic === true;
+                const isOwner = data.companyId === userData?.companyId;
+                const isAllowed = data.allowedCompanies?.includes(userData?.companyId);
+
+                if ((isActive || isOwner) && (isPublic || isOwner || isAllowed)) {
+                    fetchedThemes.push({ id: doc.id, ...data } as Theme);
+                }
+            });
+
+            setThemes(fetchedThemes);
+            if (fetchedThemes.length > 0) {
+                setSelectedTheme(prev => {
+                    if (prev) {
+                        const existing = fetchedThemes.find(t => t.id === prev.id);
+                        if (existing) return existing;
                     }
+                    return fetchedThemes[0];
+                });
+            }
+        } catch (error) {
+            console.error("Error fetching themes:", error);
+        } finally {
+            setLoadingThemes(false);
+        }
+    };
+
+    useEffect(() => {
+        if (selectedTheme && userData?.companyId) {
+            loadCustomThemeSettings();
+        }
+    }, [selectedTheme?.id, userData?.companyId]);
+
+    const loadCustomThemeSettings = async () => {
+        if (!selectedTheme || !userData?.companyId) return;
+
+        try {
+            const settingsId = `${userData.companyId}_${selectedTheme.id}`;
+            const settingsRef = doc(db, 'company_theme_settings', settingsId);
+            const settingsDoc = await getDoc(settingsRef);
+
+            if (settingsDoc.exists()) {
+                const customConfig = settingsDoc.data().layoutConfig;
+                setLayoutConfig(prev => ({ ...prev, ...customConfig }));
+            } else if (selectedTheme.defaultLayoutConfig) {
+                setLayoutConfig(prev => ({ ...prev, ...selectedTheme.defaultLayoutConfig }));
+            }
+        } catch (err) {
+            console.error("Erro ao carregar ajustes da empresa:", err);
+            if (selectedTheme.defaultLayoutConfig) {
+                setLayoutConfig(prev => ({ ...prev, ...selectedTheme.defaultLayoutConfig }));
+            }
+        }
+    };
+
+    const [filterOnlyMissing, setFilterOnlyMissing] = useState(true);
+
+    const unavailableProducts = products.filter(p => !p.loadingFirestore && !p.isLinked);
+
+    const handleCopyUnavailable = () => {
+        if (unavailableProducts.length === 0) return;
+        copyToTable(unavailableProducts, `${unavailableProducts.length} itens não encontrados copiados!`);
+    };
+
+    const handleCopyAllAsTable = () => {
+        if (products.length === 0) return;
+        copyToTable(products, `Todos os ${products.length} itens copiados como tabela!`);
+    };
+
+    const copyToTable = (itemList: any[], successMsg: string) => {
+        const header = "CÓDIGO INTERNO | DESCRIÇÃO | EAN\n";
+        const rows = itemList.map(p =>
+            `${p.internalCode || ''} | ${p.description || ''} | ${p.ean || ''}`
+        ).join('\n');
+
+        navigator.clipboard.writeText(header + rows);
+        alert(successMsg);
+    };
+
+    const [requestingImages, setRequestingImages] = useState(false);
+
+    const handleRequestImages = async () => {
+        // CRITICAL: Only items that finished Firestore check AND are still NOT linked
+        const canRequest = products.filter(p => !p.loadingFirestore && !p.isLinked && !!p.ean);
+        if (canRequest.length === 0) {
+            alert("Nenhum item pendente com código de barras disponível para solicitação.");
+            return;
+        }
+
+        if (!confirm(`Solicitar processamento de imagem para ${canRequest.length} itens faltantes?`)) return;
+
+        setRequestingImages(true);
+        try {
+            const batch = writeBatch(db);
+
+            // 1. Double check identity
+            let companyName = 'Empresa Desconhecida';
+            if (userData?.companyId) {
+                try {
+                    const compDoc = await getDoc(doc(db, 'companies', userData.companyId));
+                    if (compDoc.exists()) {
+                        companyName = compDoc.data().name || 'Empresa sem Nome';
+                    } else {
+                        console.warn("Company doc not found for ID:", userData.companyId);
+                    }
+                } catch (e) {
+                    console.error("Error fetching company name", e);
                 }
             }
 
-            // 2. If not found externally, try Firestore 'products' collection
-            if (!imageUrl && product.ean) {
-                const qEan = query(collection(db, 'products'), where('ean', '==', product.ean));
+            console.log(`🚀 Enviando ${canRequest.length} solicitações para: ${companyName} (${userData?.name})`);
+
+            canRequest.forEach(p => {
+                const reqRef = doc(db, 'product_requests', p.ean);
+                batch.set(reqRef, {
+                    ean: p.ean,
+                    description: p.description,
+                    internalCode: p.internalCode || '',
+                    companyId: userData?.companyId || 'no-id',
+                    companyName: companyName,
+                    userName: userData?.name || 'Usuário Desconhecido',
+                    userId: userData?.uid || 'no-uid',
+                    status: 'pending',
+                    type: 'images',
+                    lastRequestedAt: new Date(),
+                    // Track all companies that requested this
+                    requesters: arrayUnion({
+                        companyId: userData?.companyId || 'no-id',
+                        companyName: companyName,
+                        userName: userData?.name || 'Usuário Desconhecido',
+                        requestedAt: new Date()
+                    })
+                }, { merge: true });
+            });
+
+            await batch.commit();
+            alert("Solicitações enviadas com sucesso!");
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao enviar solicitações.");
+        } finally {
+            setRequestingImages(false);
+        }
+    };
+
+    const handleSaveThemeConfig = async () => {
+        if (!selectedTheme || !userData?.companyId) return;
+
+        try {
+            const isMasterSavingGlobal = userData.isSystemAdmin && selectedTheme.isPublic;
+
+            if (isMasterSavingGlobal) {
+                const themeRef = doc(db, 'themes', selectedTheme.id);
+                await setDoc(themeRef, { defaultLayoutConfig: layoutConfig }, { merge: true });
+                setSelectedTheme({ ...selectedTheme, defaultLayoutConfig: layoutConfig });
+                alert('Padrão Global do tema atualizado com sucesso!');
+            } else {
+                const settingsId = `${userData.companyId}_${selectedTheme.id}`;
+                const settingsRef = doc(db, 'company_theme_settings', settingsId);
+                await setDoc(settingsRef, {
+                    companyId: userData.companyId,
+                    themeId: selectedTheme.id,
+                    layoutConfig: layoutConfig,
+                    updatedAt: new Date()
+                }, { merge: true });
+                alert('Seus ajustes personalizados foram salvos para este tema!');
+            }
+        } catch (error) {
+            console.error("Erro ao salvar configurações do tema:", error);
+            alert('Erro ao salvar ajustes.');
+        }
+    };
+
+    const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+    const orchestratorRef = useRef<FlyerExportOrchestratorRef>(null);
+
+    const handleExport = (type: 'jpg-current' | 'jpg-all' | 'pdf-current' | 'pdf-all') => {
+        if (!orchestratorRef.current) {
+            alert('Aguarde o carregamento do módulo de exportação.');
+            return;
+        }
+
+        setShowDownloadMenu(false);
+
+        switch (type) {
+            case 'jpg-current':
+                orchestratorRef.current.exportCurrentPageJpg(currentPreviewPage);
+                break;
+            case 'jpg-all':
+                orchestratorRef.current.exportAllPagesJpgZip();
+                break;
+            case 'pdf-current':
+                orchestratorRef.current.exportCurrentPagePdf(currentPreviewPage);
+                break;
+            case 'pdf-all':
+                orchestratorRef.current.exportAllPagesPdf();
+                break;
+        }
+    };
+
+    const processInput = async () => {
+        if (!inputText.trim()) return;
+
+        const lines = inputText.split('\n').filter(l => l.trim());
+        const newProducts: ProductItem[] = lines.map((line, index) => {
+            let description = line;
+            let price = '';
+            let ean = '';
+            let internalCode = '';
+
+            const priceMatch = line.match(/(?:R\$\s*)?(\d+[.,]\d{2})(?!\d)/);
+            if (priceMatch) {
+                price = priceMatch[0];
+                description = description.replace(priceMatch[0], '').trim();
+            }
+
+            const ean13Match = line.match(/(\d{8,14})/);
+            const startCodeMatch = line.match(/^(\d+)/);
+
+            if (ean13Match) {
+                ean = ean13Match[0];
+                description = description.replace(ean, '').trim();
+            }
+
+            if (startCodeMatch) {
+                const possibleCode = startCodeMatch[0];
+                if (possibleCode !== ean) {
+                    internalCode = possibleCode;
+                    description = description.replace(new RegExp(`^${internalCode}`), '').trim();
+                }
+            }
+
+            description = description.replace(/^[-–\s]+|[-–\s]+$/g, '').trim();
+
+            const candidates: string[] = [];
+            if (ean) {
+                candidates.push(`https://imagens.canvazap.com.br/codbarras/${ean}.png`);
+                candidates.push(`https://cdn-cosmos.bluesoft.com.br/products/${ean}`);
+            }
+
+            return {
+                id: `p-${Date.now()}-${index}`,
+                rawText: line,
+                description: description || 'Sem descrição',
+                price: price || '',
+                ean,
+                internalCode,
+                candidateUrls: candidates,
+                loadingFirestore: true,
+                loadingImage: true,
+                isLinked: false
+            };
+        });
+
+        setProducts(newProducts);
+        setActiveTab('theme');
+        setCurrentPreviewPage(0);
+
+        for (let i = 0; i < newProducts.length; i++) {
+            checkFirestoreForProduct(newProducts[i], i);
+        }
+    };
+
+    const checkFirestoreForProduct = async (product: ProductItem, index: number) => {
+        try {
+            let foundData: any = null;
+            let resolvedEan = product.ean;
+
+            if (!resolvedEan && product.internalCode && userData?.companyId) {
+                try {
+                    const qMap = query(collection(db, 'product_mappings'),
+                        where('companyId', '==', userData.companyId),
+                        where('internalCode', '==', product.internalCode)
+                    );
+                    const snapMap = await getDocs(qMap);
+                    if (!snapMap.empty) {
+                        const mapData = snapMap.docs[0].data();
+                        if (mapData.ean) resolvedEan = mapData.ean;
+                    }
+                } catch (err) {
+                    console.error("Error checking mappings", err);
+                }
+            }
+
+            const baseConstraints = [];
+            if (userData?.companyId) baseConstraints.push(where('companyId', '==', userData.companyId));
+
+            if (resolvedEan) {
+                const qEan = query(collection(db, 'products'), where('ean', '==', resolvedEan));
                 const snapEan = await getDocs(qEan);
-                if (!snapEan.empty) {
-                    const data = snapEan.docs[0].data();
-                    if (data.imageUrl) {
-                        imageUrl = data.imageUrl;
-                        source = 'bank';
+                if (!snapEan.empty) foundData = snapEan.docs[0].data();
+            } else if (product.internalCode) {
+                const qCode = query(collection(db, 'products'), where('internalCode', '==', product.internalCode), ...baseConstraints);
+                const snapCode = await getDocs(qCode);
+                if (!snapCode.empty) foundData = snapCode.docs[0].data();
+            }
+
+            let finalImageUrl = '';
+            let hasFoundImage = false;
+            const finalEan = product.ean || resolvedEan || foundData?.ean;
+            const updatedCandidates = [...product.candidateUrls];
+
+            if (finalEan) {
+                const ext1 = `https://imagens.canvazap.com.br/codbarras/${finalEan}.png`;
+                const ext2 = `https://cdn-cosmos.bluesoft.com.br/products/${finalEan}`;
+                if (!updatedCandidates.includes(ext1)) updatedCandidates.unshift(ext1);
+                if (!updatedCandidates.includes(ext2)) updatedCandidates.push(ext2);
+
+                // Priority: Always try to find the isolated .png for Encartes first
+                const exists = await checkImageExists(ext1);
+                if (exists) {
+                    finalImageUrl = ext1;
+                    hasFoundImage = true;
+                } else {
+                    const exists2 = await checkImageExists(ext2);
+                    if (exists2) {
+                        finalImageUrl = ext2;
+                        hasFoundImage = true;
                     }
                 }
             }
 
-            // Update product in state
+            // Fallback: If no isolated image found, use what's in the database
+            if (!hasFoundImage && foundData?.imageUrl) {
+                finalImageUrl = foundData.imageUrl;
+                hasFoundImage = true;
+            }
+
             setProducts(prev => {
                 const next = [...prev];
                 if (next[index]) {
-                    next[index] = { ...next[index], imageUrl, loadingImage: false, imageSource: source };
+                    next[index] = {
+                        ...next[index],
+                        ean: finalEan,
+                        candidateUrls: updatedCandidates,
+                        imageUrl: finalImageUrl,
+                        loadingFirestore: false,
+                        loadingImage: false,
+                        isLinked: hasFoundImage
+                    };
                 }
                 return next;
             });
-
         } catch (e) {
-            console.error(e);
+            console.error("Firestore lookup failed", e);
             setProducts(prev => {
                 const next = [...prev];
                 if (next[index]) {
-                    next[index] = { ...next[index], loadingImage: false };
+                    next[index] = { ...next[index], loadingFirestore: false, loadingImage: false };
                 }
                 return next;
             });
         }
     };
 
-    // Calculate Layout
     const itemsPerPage = layoutConfig.columns * layoutConfig.rows;
     const totalPages = Math.ceil(products.length / itemsPerPage);
     const pages = Array.from({ length: totalPages }, (_, i) => products.slice(i * itemsPerPage, (i + 1) * itemsPerPage));
 
-    // Reset page if out of bounds (e.g. changing layout)
     useEffect(() => {
         if (currentPreviewPage >= totalPages && totalPages > 0) {
             setCurrentPreviewPage(totalPages - 1);
@@ -554,7 +617,50 @@ const FlyersModule = () => {
 
                     {activeTab === 'products' && (
                         <div className="fade-in">
-                            <h3 style={{ fontSize: '1rem', marginBottom: '1rem' }}>Lista de Produtos</h3>
+                            <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Lista de Produtos</h3>
+
+                            {/* Global Database Search */}
+                            <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
+                                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block', fontWeight: 600 }}>
+                                    BUSCAR NO BANCO DE IMAGENS
+                                </label>
+                                <div style={{ position: 'relative' }}>
+                                    <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--primary-color)' }} />
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        style={{ paddingLeft: '2.25rem', height: '36px', fontSize: '0.85rem', borderColor: 'var(--primary-color)' }}
+                                        placeholder="Digite nome ou EAN para buscar..."
+                                        value={globalSearch}
+                                        onChange={(e) => handleGlobalSearch(e.target.value)}
+                                    />
+                                    {searchingGlobal && <Loader2 size={14} className="loading-spinner" style={{ position: 'absolute', right: '10px', top: '11px', color: 'var(--primary-color)' }} />}
+                                </div>
+
+                                {globalResults.length > 0 && (
+                                    <div className="glass-card" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: '4px', padding: '4px', maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                                        {globalResults.map((p, i) => (
+                                            <div
+                                                key={i}
+                                                onClick={() => addProductToList(p)}
+                                                style={{ padding: '8px', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', borderBottom: '1px solid var(--border-color)' }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-color)'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                            >
+                                                <div style={{ width: '24px', height: '24px', background: '#f1f5f9', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                    <img src={p.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontWeight: 600 }}>{p.name}</div>
+                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{p.ean}</div>
+                                                </div>
+                                                <Plus size={14} style={{ color: 'var(--primary-color)' }} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
                             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
                                 Cole sua lista abaixo. Ex: "Arroz Branco 5kg R$ 25,90"
                             </p>
@@ -571,40 +677,121 @@ const FlyersModule = () => {
 
                             {products.length > 0 && (
                                 <div style={{ marginTop: '2rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                        <strong>{products.length} Itens detectados</strong>
-                                        <button className="btn-secondary" style={{ padding: '2px 8px', fontSize: '0.75rem' }} onClick={() => setProducts([])}>Limpar</button>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>
+                                            {filterOnlyMissing ? `${unavailableProducts.length} Itens pendentes` : `${products.length} Itens detectados`}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                            <button
+                                                onClick={handleCopyAllAsTable}
+                                                className="btn-secondary"
+                                                style={{ padding: '4px 8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                                title="Copiar todos como tabela"
+                                            >
+                                                <Copy size={12} /> Tabela
+                                            </button>
+                                            <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => setProducts([])}>Limpar</button>
+                                        </div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                        {products.some(p => !p.isLinked && !p.loadingFirestore && !p.ean) && (
-                                            <div style={{ padding: '0.5rem', background: '#fff3cd', color: '#856404', borderRadius: '4px', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
-                                                <AlertTriangle size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
-                                                Itens com ⚠️ precisam ser vinculados no Banco de Imagens.
+
+                                    {unavailableProducts.length > 0 && (
+                                        <div style={{ padding: '0.75rem', background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '8px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#92400e' }}>
+                                                <AlertTriangle size={16} />
+                                                <span>{unavailableProducts.length} itens sem imagem.</span>
                                             </div>
-                                        )}
-                                        {products.map((p, i) => (
-                                            <div key={p.id} style={{ padding: '0.5rem', background: 'var(--bg-color)', borderRadius: '4px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                <div style={{ width: 30, height: 30, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                    {/* We try to show first candidate or just icon */}
-                                                    {p.candidateUrls.length > 0 ? (
-                                                        <SmartImage urls={p.candidateUrls} style={{ width: '100%', height: '100%', objectFit: 'cover' }} fallback={<ImageIcon size={14} color="#94a3b8" />} />
+                                            <button
+                                                onClick={() => setFilterOnlyMissing(!filterOnlyMissing)}
+                                                style={{ background: 'none', border: 'none', color: '#b45309', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
+                                            >
+                                                {filterOnlyMissing ? 'Ver Todos' : 'Filtrar Faltantes'}
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Request button restricted to unlinked items WITH ean */}
+                                    {unavailableProducts.some(p => !!p.ean) && (
+                                        <button
+                                            className="btn btn-primary"
+                                            style={{ width: '100%', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '0.8rem', fontSize: '0.9rem' }}
+                                            onClick={handleRequestImages}
+                                            disabled={requestingImages}
+                                        >
+                                            {requestingImages ? <Loader2 className="loading-spinner" /> : <ImagePlus size={18} />}
+                                            {`Solicitar ${unavailableProducts.filter(p => !!p.ean).length} Imagens`}
+                                        </button>
+                                    )}
+
+                                    {/* Product Search */}
+                                    <div style={{ position: 'relative', marginBottom: '1rem' }}>
+                                        <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--text-muted)' }} />
+                                        <input
+                                            type="text"
+                                            className="form-input"
+                                            style={{ paddingLeft: '2.25rem', height: '36px', fontSize: '0.85rem' }}
+                                            placeholder="Buscar na lista (nome ou código)..."
+                                            value={productSearchTerm}
+                                            onChange={(e) => setProductSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                        {products
+                                            .filter(p => {
+                                                const matchesSearch =
+                                                    p.description.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
+                                                    (p.ean || '').includes(productSearchTerm) ||
+                                                    (p.internalCode || '').includes(productSearchTerm);
+
+                                                const matchesMissing = filterOnlyMissing ? (!p.isLinked) : true;
+
+                                                return matchesSearch && matchesMissing;
+                                            })
+                                            .map((p, i) => (
+                                                <div key={p.id} style={{
+                                                    padding: '0.6rem',
+                                                    background: !p.isLinked ? '#fff1f1' : '#f8fafc',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.8rem',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.6rem',
+                                                    border: !p.isLinked ? '1px solid #fecaca' : '1px solid var(--border-color)',
+                                                    opacity: p.loadingFirestore ? 0.6 : 1
+                                                }}>
+                                                    <div style={{ width: 34, height: 34, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                        {p.imageUrl ? (
+                                                            <img src={p.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        ) : (
+                                                            <ImageIcon size={16} color="#94a3b8" />
+                                                        )}
+                                                    </div>
+                                                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 600, color: !p.isLinked ? '#991b1b' : 'inherit' }}>
+                                                            {p.description}
+                                                        </div>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '4px', alignItems: 'flex-end' }}>
+                                                            <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{p.price}</span>
+                                                            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', opacity: 0.6, fontFamily: 'monospace', fontSize: '0.65rem' }}>
+                                                                {p.internalCode && <span>Cód: {p.internalCode}</span>}
+                                                                {p.ean && <span>{p.ean}</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {p.loadingFirestore ? (
+                                                        <Loader2 size={14} className="loading-spinner" style={{ color: 'var(--primary-color)' }} />
+                                                    ) : !p.isLinked ? (
+                                                        <div title="Imagem pendente" style={{ color: '#ef4444' }}>
+                                                            <AlertCircle size={14} />
+                                                        </div>
                                                     ) : (
-                                                        <ImageIcon size={14} color="#94a3b8" />
+                                                        <div title="Imagem vinculada" style={{ color: '#22c55e' }}>
+                                                            <Check size={14} />
+                                                        </div>
                                                     )}
                                                 </div>
-                                                <div style={{ flex: 1, overflow: 'hidden' }}>
-                                                    <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>{p.description}</div>
-                                                    <div style={{ color: 'var(--text-muted)' }}>{p.price}</div>
-                                                </div>
-                                                {/* Status Icons */}
-                                                {!p.loadingFirestore && !p.isLinked && !p.ean && (
-                                                    <div title="Este item não possui EAN nem vínculo no banco de imagens." style={{ color: 'orange' }}>
-                                                        <AlertTriangle size={16} />
-                                                    </div>
-                                                )}
-                                                {!p.imageUrl && !p.loadingImage && !p.loadingFirestore && p.ean && <AlertCircle size={14} color="#ccc" title="Imagem não encontrada" />}
-                                            </div>
-                                        ))}
+                                            ))}
                                     </div>
                                 </div>
                             )}
@@ -614,8 +801,25 @@ const FlyersModule = () => {
                     {activeTab === 'theme' && (
                         <div className="fade-in">
                             <h3 style={{ fontSize: '1rem', marginBottom: '1rem' }}>Escolha um Tema</h3>
+
+                            {/* Filtro de Temas */}
+                            <div style={{ position: 'relative', marginBottom: '1.25rem' }}>
+                                <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--text-muted)' }} />
+                                <input
+                                    type="text"
+                                    className="form-input"
+                                    style={{ paddingLeft: '2.25rem', height: '36px', fontSize: '0.85rem' }}
+                                    placeholder="Buscar por nome ou tag..."
+                                    value={themeSearch}
+                                    onChange={e => setThemeSearch(e.target.value)}
+                                />
+                            </div>
+
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                {themes.map(theme => (
+                                {themes.filter(t =>
+                                    t.name.toLowerCase().includes(themeSearch.toLowerCase()) ||
+                                    (t.tags || []).some(tag => tag.toLowerCase().includes(themeSearch.toLowerCase()))
+                                ).map(theme => (
                                     <div
                                         key={theme.id}
                                         onClick={() => setSelectedTheme(theme)}
@@ -624,20 +828,20 @@ const FlyersModule = () => {
                                             borderRadius: '8px',
                                             overflow: 'hidden',
                                             cursor: 'pointer',
-                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                            position: 'relative'
                                         }}
                                     >
                                         <div style={{ height: '100px', background: '#e2e8f0', position: 'relative' }}>
                                             <img src={theme.backgroundEncartes} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                            {userData?.role === 'admin' && (
-                                                <button
-                                                    onClick={(e) => handleDuplicateTheme(e, theme)}
-                                                    title="Duplicar Tema"
-                                                    style={{ position: 'absolute', top: 5, right: 5, background: 'white', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
-                                                >
-                                                    <Copy size={14} color="#333" />
-                                                </button>
-                                            )}
+
+                                            <div style={{ position: 'absolute', top: 5, left: 5, display: 'flex', gap: '4px' }}>
+                                                {!theme.isPublic && theme.companyId !== userData?.companyId && (
+                                                    <span style={{ fontSize: '0.6rem', background: 'var(--primary-color)', color: 'white', padding: '1px 5px', borderRadius: '4px' }}>Interno</span>
+                                                )}
+                                            </div>
+
+
                                         </div>
                                         <div style={{ padding: '0.5rem', fontSize: '0.8rem', fontWeight: 600, textAlign: 'center' }}>
                                             {theme.name}
@@ -684,6 +888,65 @@ const FlyersModule = () => {
                                         <label>EAN</label>
                                         <input type="color" value={layoutConfig.colorEan} onChange={e => setLayoutConfig({ ...layoutConfig, colorEan: e.target.value })} />
                                     </div>
+                                </div>
+                            </details>
+
+                            {/* Section: Ordem dos Elementos */}
+                            <details className="settings-group">
+                                <summary>Ordem dos Textos</summary>
+                                <div className="settings-content">
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 0' }}>
+                                        {(layoutConfig.elementsOrder || ['code', 'description', 'price']).map((item, index) => (
+                                            <div
+                                                key={item}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '12px',
+                                                    background: 'var(--surface-color)',
+                                                    padding: '10px 14px',
+                                                    borderRadius: '8px',
+                                                    border: '1px solid var(--border-color)'
+                                                }}
+                                            >
+                                                <Grid size={16} color="var(--text-muted)" />
+                                                <span style={{ flex: 1, fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+                                                    {item === 'code' ? 'Códigos (Cód/EAN)' : item === 'description' ? 'Descrição do Produto' : 'Preço Principal'}
+                                                </span>
+                                                <div style={{ display: 'flex', gap: '4px' }}>
+                                                    <button
+                                                        disabled={index === 0}
+                                                        onClick={() => {
+                                                            const nextOrder = [...(layoutConfig.elementsOrder || [])];
+                                                            const temp = nextOrder[index];
+                                                            nextOrder[index] = nextOrder[index - 1];
+                                                            nextOrder[index - 1] = temp;
+                                                            setLayoutConfig({ ...layoutConfig, elementsOrder: nextOrder });
+                                                        }}
+                                                        className="btn-icon" style={{ width: 24, height: 24, padding: 0, opacity: index === 0 ? 0.3 : 1 }}
+                                                    >
+                                                        <ChevronDown size={14} style={{ transform: 'rotate(180deg)' }} />
+                                                    </button>
+                                                    <button
+                                                        disabled={index === (layoutConfig.elementsOrder?.length || 3) - 1}
+                                                        onClick={() => {
+                                                            const nextOrder = [...(layoutConfig.elementsOrder || [])];
+                                                            const temp = nextOrder[index];
+                                                            nextOrder[index] = nextOrder[index + 1];
+                                                            nextOrder[index + 1] = temp;
+                                                            setLayoutConfig({ ...layoutConfig, elementsOrder: nextOrder });
+                                                        }}
+                                                        className="btn-icon" style={{ width: 24, height: 24, padding: 0, opacity: index === ((layoutConfig.elementsOrder?.length || 3) - 1) ? 0.3 : 1 }}
+                                                    >
+                                                        <ChevronDown size={14} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center' }}>
+                                        Use as setas para definir a ordem dos elementos no card.
+                                    </p>
                                 </div>
                             </details>
 
@@ -743,17 +1006,21 @@ const FlyersModule = () => {
                                 </div>
                             </details>
 
-                            {/* Section: Ajustes do Preço */}
+                            {/* Section: Ajustes de Tipografia */}
                             <details className="settings-group">
-                                <summary>Ajustes do Preço</summary>
+                                <summary>Ajustes de Tipografia</summary>
                                 <div className="settings-content">
-                                    <div className="form-group row">
-                                        <label>Mostrar Selo</label>
-                                        <input type="checkbox" checked={layoutConfig.showPriceSeal} onChange={e => setLayoutConfig({ ...layoutConfig, showPriceSeal: e.target.checked })} />
+                                    <div className="form-group">
+                                        <label>Tamanho Descrição (rem)</label>
+                                        <input className="form-input" type="number" step="0.1" value={layoutConfig.fontSizeDescription} onChange={e => setLayoutConfig({ ...layoutConfig, fontSizeDescription: Number(e.target.value) })} />
                                     </div>
                                     <div className="form-group">
-                                        <label>Tam. Fonte (rem)</label>
+                                        <label>Tamanho Preço (rem)</label>
                                         <input className="form-input" type="number" step="0.1" value={layoutConfig.fontSizePrice} onChange={e => setLayoutConfig({ ...layoutConfig, fontSizePrice: Number(e.target.value) })} />
+                                    </div>
+                                    <div className="form-group row">
+                                        <label>Mostrar Selo de Preço</label>
+                                        <input type="checkbox" checked={layoutConfig.showPriceSeal} onChange={e => setLayoutConfig({ ...layoutConfig, showPriceSeal: e.target.checked })} />
                                     </div>
                                 </div>
                             </details>
@@ -786,6 +1053,7 @@ const FlyersModule = () => {
                                         <select className="form-input" value={layoutConfig.cardBackgroundMode} onChange={e => setLayoutConfig({ ...layoutConfig, cardBackgroundMode: e.target.value })} >
                                             <option value="none">Nenhum</option>
                                             <option value="white">Branco</option>
+                                            <option value="gradient">Gradiente Suave</option>
                                             <option value="glass">Glass</option>
                                         </select>
                                     </div>
@@ -815,7 +1083,7 @@ const FlyersModule = () => {
                                     </div>
                                     <div className="form-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
                                         <div><label>Pos X (%)</label><input className="form-input" type="number" step="0.1" value={layoutConfig.logoConfig?.x ?? 0} onChange={e => setLayoutConfig({ ...layoutConfig, logoConfig: { ...layoutConfig.logoConfig!, x: Number(e.target.value) } })} /></div>
-                                        <div><label>Pos Y (px)</label><input className="form-input" type="number" step="1" value={layoutConfig.logoConfig?.y ?? 0} onChange={e => setLayoutConfig({ ...layoutConfig, logoConfig: { ...layoutConfig.logoConfig!, y: Number(e.target.value) } })} /></div>
+                                        <div><label>Pos Y (%)</label><input className="form-input" type="number" step="1" value={layoutConfig.logoConfig?.y ?? 0} onChange={e => setLayoutConfig({ ...layoutConfig, logoConfig: { ...layoutConfig.logoConfig!, y: Number(e.target.value) } })} /></div>
                                     </div>
                                     <div className="form-group">
                                         <label>Escala</label>
@@ -843,7 +1111,7 @@ const FlyersModule = () => {
                                     </div>
                                     <div className="form-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
                                         <div><label>Pos X (%)</label><input className="form-input" type="number" value={layoutConfig.sideTextConfig.x} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, x: Number(e.target.value) } })} /></div>
-                                        <div><label>Pos Y (px)</label><input className="form-input" type="number" value={layoutConfig.sideTextConfig.y} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, y: Number(e.target.value) } })} /></div>
+                                        <div><label>Pos Y (%)</label><input className="form-input" type="number" value={layoutConfig.sideTextConfig.y} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, y: Number(e.target.value) } })} /></div>
                                     </div>
                                     <div className="form-group">
                                         <label>Rotação (graus)</label>

@@ -7,7 +7,7 @@ import { useAuth } from './AuthContext';
 
 const Onboarding = () => {
     const navigate = useNavigate();
-    const { userData } = useAuth();
+    const { userData, initError } = useAuth();
 
     const handleLogout = () => {
         auth.signOut();
@@ -20,6 +20,21 @@ const Onboarding = () => {
                     <h1 className="title">Bem-vindo ao CanvaZap</h1>
                     <p className="subtitle">Escolha como você deseja começar sua jornada.</p>
                 </div>
+
+                {initError && (
+                    <div className="glass-card" style={{
+                        marginBottom: '2rem',
+                        padding: '1rem',
+                        border: '1px solid var(--error-color)',
+                        background: 'rgba(239, 68, 68, 0.05)',
+                        color: 'var(--error-color)',
+                        fontSize: '0.9rem',
+                        textAlign: 'center'
+                    }}>
+                        <strong>Aviso de Sistema:</strong> Algumas informações do seu perfil não puderam ser carregadas ({initError.code || 'Erro'}).
+                        Isso pode limitar as opções abaixo.
+                    </div>
+                )}
 
                 <div style={{
                     display: 'grid',

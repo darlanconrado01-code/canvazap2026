@@ -29,13 +29,29 @@ export const SmartImage = ({ urls, style, fallback, crossOrigin }: SmartImagePro
         return <>{fallback}</>;
     }
 
+    // Para evitar estiramento no exportador, usamos background-image.
+    // Combinado com o container quadrado no FlyerPage, o resultado é matematicamente perfeito.
     return (
-        <img
-            src={urls[currentSrcIndex]}
-            onError={handleError}
-            style={style}
-            referrerPolicy="no-referrer"
-            crossOrigin={crossOrigin}
-        />
+        <div
+            style={{
+                ...style,
+                backgroundImage: `url("${urls[currentSrcIndex]}")`,
+                backgroundSize: 'contain',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                display: 'block'
+            }}
+            role="img"
+            aria-label="Produto"
+        >
+            {/* Imagem invisível para manter o carregamento e avisar o onError */}
+            <img
+                src={urls[currentSrcIndex]}
+                onError={handleError}
+                style={{ opacity: 0, width: '1px', height: '1px', position: 'absolute' }}
+                crossOrigin={crossOrigin}
+                alt=""
+            />
+        </div>
     );
 };

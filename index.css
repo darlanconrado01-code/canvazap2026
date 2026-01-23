@@ -226,7 +226,6 @@ button {
   font-size: 0.75rem;
   color: var(--text-secondary);
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 24px 16px 8px 16px;
 }

@@ -44,6 +44,7 @@ const CreateCompany = () => {
                 name: companyName,
                 code: code,
                 ownerId: user.uid,
+                memberUids: [user.uid], // Set as first member
                 status: 'inactive', // Companies start inactive until activated by support
                 createdAt: new Date(),
             });

@@ -7,7 +7,10 @@ import {
     Building2,
     LogOut,
     ShieldCheck,
-    Palette
+    Palette,
+    Clock,
+    FileText,
+    FlaskConical
 } from 'lucide-react';
 import { auth } from '../services/firebaseConfig';
 
@@ -60,9 +63,25 @@ const AdminSidebar = () => {
                     <span>Usuários Global</span>
                 </NavLink>
 
+                <NavLink to="/admin/aprovacoes" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                    <Clock size={20} />
+                    <span>Aprovações</span>
+                </NavLink>
+
                 <NavLink to="/admin/temas" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                     <Palette size={20} />
                     <span>Temas</span>
+                </NavLink>
+
+                <NavLink to="/admin/solicitacoes" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                    <FileText size={20} />
+                    <span>Solicitações</span>
+                </NavLink>
+
+                <div className="sidebar-category" style={{ marginTop: '1.5rem' }}>Debug</div>
+                <NavLink to="/admin/debug" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`} style={{ color: '#F59E0B' }}>
+                    <FlaskConical size={20} />
+                    <span>Diagnóstico Firestore</span>
                 </NavLink>
             </nav>
 

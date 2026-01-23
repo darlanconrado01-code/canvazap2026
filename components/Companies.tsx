@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../services/firebaseConfig';
+import { db, auth } from '../services/firebaseConfig';
 import { collection, query, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import {
   Search,
@@ -23,6 +23,7 @@ const Companies = () => {
   const { userData } = useAuth();
   const [companies, setCompanies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingCompany, setEditingCompany] = useState<any>(null);
   const [showModuleModal, setShowModuleModal] = useState(false);
@@ -37,12 +38,29 @@ const Companies = () => {
       const querySnapshot = await getDocs(collection(db, 'companies'));
       const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setCompanies(data);
-    } catch (error) {
-      console.error("Error fetching companies:", error);
+    } catch (e: any) {
+      console.error("FIRESTORE ERROR (fetchCompanies)", {
+        code: e?.code,
+        message: e?.message,
+        query: "collection(companies)",
+        uid: auth.currentUser?.uid
+      });
+      setError(e);
     } finally {
       setLoading(false);
     }
   };
+
+  if (error) {
+    return (
+      <div className="glass-card" style={{ padding: '2rem', textAlign: 'center' }}>
+        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🏢❌</div>
+        <h3>Erro ao carregar empresas</h3>
+        <p style={{ color: 'var(--text-secondary)' }}>{error.code}: {error.message}</p>
+        <button onClick={() => window.location.reload()} className="btn btn-primary" style={{ marginTop: '1rem', width: 'auto', padding: '0.5rem 1.5rem' }}>Recarregar</button>
+      </div>
+    );
+  }
 
   const handleToggleStatus = async (company: any) => {
     const newStatus = company.status === 'active' ? 'inactive' : 'active';
@@ -154,8 +172,22 @@ const Companies = () => {
                 <tr key={company.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <td style={{ padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-color)' }}>
-                        <Building2 size={20} />
+                      <div style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '10px',
+                        background: 'var(--primary-light)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--primary-color)',
+                        overflow: 'hidden'
+                      }}>
+                        {company.logoUrl ? (
+                          <img src={company.logoUrl} alt={company.name} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '4px' }} />
+                        ) : (
+                          <Building2 size={20} />
+                        )}
                       </div>
                       <div>
                         <div style={{ fontWeight: 600 }}>{company.name}</div>
