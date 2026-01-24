@@ -18,6 +18,8 @@ import CompanyProfile from './components/CompanyProfile';
 import Companies from './components/Companies';
 import LaminasModule from './components/LaminasModule';
 import JobVacancyModule from './components/JobVacancyModule';
+import TasksModule from './components/TasksModule';
+import ArtApprovalModule from './components/ArtApprovalModule';
 import Onboarding from './components/Onboarding';
 import CreateCompany from './components/CreateCompany';
 import JoinCompany from './components/JoinCompany';
@@ -121,6 +123,8 @@ function App() {
             <Route path="debug" element={<FirestoreDebug />} />
             <Route path="temas" element={<ThemesModule />} />
             <Route path="solicitacoes" element={<RequestsModule />} />
+            <Route path="tarefas" element={<TasksModule />} />
+            <Route path="artes-postagens" element={<ArtApprovalModule />} />
           </Route>
 
           {/* App Layout Routes */}
@@ -134,12 +138,14 @@ function App() {
             <Route path="/artes-vagas" element={<ProtectedRoute><JobVacancyModule /></ProtectedRoute>} />
             <Route path="/banco-imagens" element={<ProtectedRoute><ImageBankModule /></ProtectedRoute>} />
             <Route path="/encartes" element={<ProtectedRoute><FlyersModule /></ProtectedRoute>} />
+            <Route path="/artes-postagens" element={<ProtectedRoute><ArtApprovalModule /></ProtectedRoute>} />
             <Route path="/company-profile" element={<ProtectedRoute><CompanyProfile /></ProtectedRoute>} />
             <Route path="/crachas" element={<ProtectedRoute><ModulePlaceholder title="Crachás" /></ProtectedRoute>} />
             <Route path="/temas" element={<ProtectedRoute><ThemesModule /></ProtectedRoute>} />
             <Route path="/usuarios" element={<ProtectedRoute><UsersModule /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/solicitacoes" element={<ProtectedRoute><RequestsModule /></ProtectedRoute>} />
+            <Route path="/tarefas" element={<ProtectedRoute><TasksModule /></ProtectedRoute>} />
           </Route>
 
           {/* Onboarding Routes */}

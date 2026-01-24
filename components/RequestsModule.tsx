@@ -63,7 +63,7 @@ const RequestsModule = () => {
 
             // Additional client-side filter for 'images' tab to exclude 'laminas'
             if (activeType === 'images') {
-                fetchedRequests = fetchedRequests.filter(r => !r.type || r.type === 'images' || r.type === 'product');
+                fetchedRequests = fetchedRequests.filter(r => !r.type || r.type === 'images');
             }
 
             // Client-side sort: newest first
@@ -130,7 +130,8 @@ const RequestsModule = () => {
                             imageUrl: isLaminas
                                 ? `https://imagens.canvazap.com.br/laminas/${ean}.jpg`
                                 : `https://imagens.canvazap.com.br/codbarras/${ean}.png`,
-                            updatedAt: new Date()
+                            updatedAt: new Date(),
+                            hasImage: true
                         }, { merge: true });
                     }
                 });
@@ -168,7 +169,8 @@ const RequestsModule = () => {
                 imageUrl: isLaminas
                     ? `https://imagens.canvazap.com.br/laminas/${ean}.jpg`
                     : `https://imagens.canvazap.com.br/codbarras/${ean}.png`,
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                hasImage: true
             }, { merge: true });
 
             setRequests(prev => prev.filter(r => r.ean !== ean));
@@ -220,7 +222,8 @@ const RequestsModule = () => {
                         imageUrl: isLaminas
                             ? `https://imagens.canvazap.com.br/laminas/${ean}.jpg`
                             : `https://imagens.canvazap.com.br/codbarras/${ean}.png`,
-                        updatedAt: new Date()
+                        updatedAt: new Date(),
+                        hasImage: true
                     }, { merge: true });
                 }
             });

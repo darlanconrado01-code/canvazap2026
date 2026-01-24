@@ -9,7 +9,7 @@ const FirestoreDebug = () => {
     const { userData } = useAuth();
     const [results, setResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
-    const [searchUID, setSearchUID] = useState('lK0m19X8fGZkNozREj5L3Y5F8y42'); // Default to Pato for convenience
+    const [searchUID, setSearchUID] = useState(auth.currentUser?.uid || '');
 
     const logResult = (name: string, status: 'ok' | 'error' | 'loading', message: string, data?: any) => {
         setResults(prev => {

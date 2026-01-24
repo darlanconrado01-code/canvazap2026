@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Search, User as UserIcon, LogOut, ChevronDown, Building2 } from 'lucide-react';
+import { Bell, Search, User as UserIcon, LogOut, ChevronDown, Building2, Plus } from 'lucide-react';
 import { db } from '../services/firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
 
@@ -256,6 +256,13 @@ const TopBar = () => {
                                         style={{ width: '100%', padding: '0.5rem', color: 'var(--text-secondary)', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                                     >
                                         <UserIcon size={14} /> Meu Perfil
+                                    </button>
+
+                                    <button
+                                        onClick={() => navigate('/create-company')}
+                                        style={{ width: '100%', padding: '0.5rem', color: 'var(--primary-color)', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}
+                                    >
+                                        <Plus size={14} /> Criar Nova Empresa
                                     </button>
                                 </div>
                             </div>

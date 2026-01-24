@@ -188,94 +188,130 @@ const ImageBankModule = () => {
 
         try {
             const lines = bulkText.split('\n');
-            // Remove empty lines
             const validLines = lines.filter(l => l.trim().length > 0);
 
             let successCount = 0;
-            const CHUNK_SIZE = 200; // Batch limitation safety (500 ops max)
+            let alreadyExistsCount = 0;
+            const CHUNK_SIZE = 50; // Smaller chunks for HTTP checks
 
-            // Process in chunks
+            const checkImageExists = (url: string): Promise<boolean> => {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    const timeout = setTimeout(() => { img.src = ''; resolve(false); }, 3000);
+                    img.onload = () => { clearTimeout(timeout); resolve(true); };
+                    img.onerror = () => { clearTimeout(timeout); resolve(false); };
+                    img.src = url;
+                });
+            };
+
             for (let i = 0; i < validLines.length; i += CHUNK_SIZE) {
                 const chunk = validLines.slice(i, i + CHUNK_SIZE);
                 const batch = writeBatch(db);
                 let opsInBatch = 0;
 
-                for (const line of chunk) {
+                // 1. Identify EANs in this chunk
+                const itemsToProcess = chunk.map(line => {
                     const parts = line.trim().split(/\s+/);
-                    if (parts.length < 2) continue;
+                    if (parts.length < 2) return null;
 
                     let eanIndex = -1;
+                    if (/^\d{7,14}$/.test(parts[parts.length - 1])) eanIndex = parts.length - 1;
+                    else if (/^\d{7,14}$/.test(parts[1])) eanIndex = 1;
+                    else eanIndex = parts.findIndex(p => /^\d{8,14}$/.test(p));
 
-                    // 1. Check Last part (Format: CODE DESC EAN)
-                    if (/^\d{7,14}$/.test(parts[parts.length - 1])) {
-                        eanIndex = parts.length - 1;
-                    }
-                    // 2. Check Second part (Format: CODE EAN DESC)
-                    else if (/^\d{7,14}$/.test(parts[1])) {
-                        eanIndex = 1;
-                    }
-                    // 3. Scan all (Format: EAN DESC CODE ?)
-                    else {
-                        eanIndex = parts.findIndex(p => /^\d{8,14}$/.test(p));
-                    }
+                    if (eanIndex === -1) return null;
 
-                    if (eanIndex !== -1) {
-                        const ean = parts[eanIndex];
-                        // If EAN is the first item, we use it as code too, or assume no code? 
-                        // Let's assume index 0 is always the 'Code' intended unless it is the EAN itself, 
-                        // in which case we duplicate or use a '0' mapping?
-                        // For consistency with user's specific case '3344 789...', index 0 is code.
-                        const internalCode = parts[0];
+                    const ean = parts[eanIndex];
+                    const internalCode = parts[0];
+                    const descriptionParts = parts.filter((_, idx) => idx !== 0 && idx !== eanIndex);
+                    const description = descriptionParts.join(' ');
 
-                        // Description is everything else excluding the Code(0) and the EAN(eanIndex)
-                        // If eanIndex is 0, internalCode IS ean, and description is the rest.
-                        const descriptionParts = parts.filter((_, idx) => idx !== 0 && idx !== eanIndex);
-                        const description = descriptionParts.join(' ');
+                    return { ean, internalCode, description };
+                }).filter(item => item !== null) as { ean: string, internalCode: string, description: string }[];
 
-                        if (ean && internalCode) {
-                            // 1. Mapping
-                            const mappingId = `${userData.companyId}_${ean}`;
-                            batch.set(doc(db, 'product_mappings', mappingId), {
-                                companyId: userData.companyId,
-                                ean: ean,
-                                internalCode: internalCode,
-                                description: description,
-                                updatedAt: new Date()
-                            }, { merge: true });
+                if (itemsToProcess.length === 0) continue;
 
-                            // 2. Request
-                            // Only set request if we have a robust EAN
-                            if (ean.length > 5 && !ean.includes('/')) {
-                                const currentMembership = userData.memberships?.find(m => m.companyId === userData.companyId);
-                                const companyName = currentMembership?.companyName || 'Empresa Indefinida';
-                                const userName = userData.displayName || userData.email || 'Usuário';
+                // 2. Fetch existing products for these EANs to check 'hasImage' flag
+                const eans = itemsToProcess.map(it => it.ean);
+                // Firestore 'in' limit is now 30, so let's use smaller sub-chunks if needed or just process
+                const productsMap: Record<string, any> = {};
 
-                                batch.set(doc(db, 'product_requests', ean), {
-                                    ean: ean,
-                                    description: description,
-                                    internalCode: internalCode, // Added
-                                    companyName: companyName,   // Added
-                                    userName: userName,         // Added
-                                    lastRequestedBy: userData.companyId,
-                                    lastRequestedAt: new Date(),
-                                    status: 'pending'
-                                }, { merge: true });
-                            }
-
-                            successCount++;
-                            opsInBatch += 2;
-                        }
-                    }
+                // For simplicity and speed in this context, we take chunks of 30
+                for (let j = 0; j < eans.length; j += 30) {
+                    const subEans = eans.slice(j, j + 30);
+                    const qProducts = query(collection(db, 'products'), where('ean', 'in', subEans));
+                    const snapProducts = await getDocs(qProducts);
+                    snapProducts.forEach(doc => {
+                        productsMap[doc.data().ean] = doc.data();
+                    });
                 }
+
+                // 3. Process items
+                await Promise.all(itemsToProcess.map(async (item) => {
+                    const existingProduct = productsMap[item.ean];
+                    let hasImage = existingProduct?.hasImage === true;
+
+                    // If not flagged but product exists, or doesn't exist, check the server
+                    if (!hasImage && item.ean.length > 5 && !item.ean.includes('/')) {
+                        const standardUrl = `https://imagens.canvazap.com.br/codbarras/${item.ean}.png`;
+                        hasImage = await checkImageExists(standardUrl);
+                    }
+
+                    // A. Update Mapping (Always)
+                    const mappingId = `${userData.companyId}_${item.ean}`;
+                    batch.set(doc(db, 'product_mappings', mappingId), {
+                        companyId: userData.companyId,
+                        ean: item.ean,
+                        internalCode: item.internalCode,
+                        description: item.description,
+                        updatedAt: new Date()
+                    }, { merge: true });
+                    opsInBatch++;
+
+                    // B. Handle Product Document
+                    if (hasImage) {
+                        // Mark as having image in products collection
+                        batch.set(doc(db, 'products', item.ean), {
+                            ean: item.ean,
+                            name: item.description,
+                            imageUrl: `https://imagens.canvazap.com.br/codbarras/${item.ean}.png`,
+                            hasImage: true,
+                            updatedAt: new Date()
+                        }, { merge: true });
+                        opsInBatch++;
+
+                        // If it was pending, we could resolve it, but here it's easier to just skip the request
+                        alreadyExistsCount++;
+                    } else {
+                        // Create/Update Product Request
+                        const currentMembership = userData.memberships?.find(m => m.companyId === userData.companyId);
+                        const companyName = currentMembership?.companyName || 'Empresa Indefinida';
+                        const userName = userData.displayName || userData.email || 'Usuário';
+
+                        batch.set(doc(db, 'product_requests', item.ean), {
+                            ean: item.ean,
+                            description: item.description,
+                            internalCode: item.internalCode,
+                            companyName: companyName,
+                            userName: userName,
+                            lastRequestedBy: userData.companyId,
+                            lastRequestedAt: new Date(),
+                            status: 'pending'
+                        }, { merge: true });
+                        opsInBatch++;
+                    }
+                    successCount++;
+                }));
 
                 if (opsInBatch > 0) {
                     await batch.commit();
                 }
             }
 
-            setBulkMessage({ type: 'success', text: `${successCount} itens processados com sucesso!` });
+            let msg = `${successCount} itens processados.`;
+            if (alreadyExistsCount > 0) msg += ` (${alreadyExistsCount} já tinham imagem e foram pulados)`;
+            setBulkMessage({ type: 'success', text: msg });
             setBulkText('');
-            // Trigger refresh (maybe wait a bit or just run it)
             fetchProducts();
 
         } catch (error: any) {

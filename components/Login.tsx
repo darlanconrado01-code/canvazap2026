@@ -75,8 +75,10 @@ const Login = () => {
                 setError('Este e-mail já está em uso.');
             } else if (err.code === 'auth/invalid-credential') {
                 setError('E-mail ou senha inválidos.');
+            } else if (err.code === 'auth/operation-not-allowed') {
+                setError('Erro: O provedor de E-mail/Senha está desativado no Console do Firebase.');
             } else {
-                setError('Ocorreu um erro. Tente novamente.');
+                setError(`Erro técnico: [${err.code}] ${err.message}`);
                 console.error(err);
             }
         } finally {

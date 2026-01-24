@@ -324,17 +324,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const switchCompany = async (targetCompanyId: string) => {
-        if (!user || !userData) return;
+        const isImpersonating = !!impersonatedData;
+        const targetUid = isImpersonating ? impersonatedData.uid : user?.uid;
 
-        // precise update to avoiding re-fetching lag
-        setLoading(true); // fast visual feedback
+        console.log('🔄 [AuthContext] Switching company to:', targetCompanyId, 'for UID:', targetUid, 'Impersonating:', isImpersonating);
+
+        if (!targetUid) return;
+
+        setLoading(true);
         try {
-            await updateDoc(doc(db, 'users', user.uid), {
+            // Use setDoc with merge to ensure doc existence
+            await setDoc(doc(db, 'users', targetUid), {
                 currentCompanyId: targetCompanyId
-            });
-            await fetchUserData(user.uid);
+            }, { merge: true });
+
+            if (isImpersonating) {
+                // If impersonating, we need to refresh the impersonated context
+                await impersonateUser(targetUid);
+            } else {
+                // Otherwise refresh own data
+                await fetchUserData(targetUid);
+            }
+            console.log('✅ [AuthContext] Company switched successfully');
         } catch (err) {
-            console.error(err);
+            console.error('❌ [AuthContext] Error switching company:', err);
+            alert('Erro ao trocar de empresa. Verifique sua conexão.');
         } finally {
             setLoading(false);
         }

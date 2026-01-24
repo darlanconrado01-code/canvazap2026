@@ -16,7 +16,8 @@ const CompanyProfile = () => {
         address: '',
         website: '',
         description: '',
-        color: '#2563eb' // Brand color
+        color: '#2563eb', // Brand color
+        openaiApiKey: ''
     });
 
     useEffect(() => {
@@ -34,7 +35,8 @@ const CompanyProfile = () => {
                             address: data.address || '',
                             website: data.website || '',
                             description: data.description || '',
-                            color: data.color || '#2563eb'
+                            color: data.color || '#2563eb',
+                            openaiApiKey: data.openaiApiKey || ''
                         });
                     }
                 } catch (error) {
@@ -187,6 +189,31 @@ const CompanyProfile = () => {
                             value={formData.description}
                             onChange={e => setFormData({ ...formData, description: e.target.value })}
                         />
+                    </div>
+
+                    <div style={{ padding: '1.5rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '1rem' }}>
+                        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Globe size={18} color="var(--primary-color)" /> Integrações & IA
+                        </h3>
+                        <div className="form-group">
+                            <label className="form-label" style={{ fontWeight: 600 }}>Chave API OpenAI</label>
+                            <div style={{ position: 'relative' }}>
+                                <input
+                                    type="password"
+                                    className="form-input w-full"
+                                    placeholder="sk-..."
+                                    value={formData.openaiApiKey}
+                                    onChange={e => setFormData({ ...formData, openaiApiKey: e.target.value })}
+                                    style={{ paddingRight: '2.5rem' }}
+                                />
+                                <div style={{ position: 'absolute', right: '12px', top: '11px', opacity: 0.5 }}>
+                                    <Globe size={16} />
+                                </div>
+                            </div>
+                            <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+                                Esta chave será usada para análise de conteúdo e geração de legendas automáticas para sua empresa.
+                            </p>
+                        </div>
                     </div>
 
                     <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end' }}>

@@ -544,6 +544,22 @@ const FlyersModule = () => {
                 hasFoundImage = true;
             }
 
+            // Optimization: If we found an image that wasn't marked, update the DB
+            if (hasFoundImage && finalEan && !foundData?.hasImage) {
+                setDoc(doc(db, 'products', finalEan), {
+                    hasImage: true,
+                    imageUrl: finalImageUrl,
+                    updatedAt: new Date()
+                }, { merge: true }).catch(err => console.error("Error updating image flag:", err));
+
+                // Also resolve any pending request if it exists
+                updateDoc(doc(db, 'product_requests', finalEan), {
+                    status: 'resolved',
+                    resolvedAt: new Date(),
+                    autoResolved: true
+                }).catch(() => { /* ignore if request doesn't exist */ });
+            }
+
             setProducts(prev => {
                 const next = [...prev];
                 if (next[index]) {

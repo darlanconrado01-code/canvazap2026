@@ -326,28 +326,31 @@ const UsersModule = () => {
                                         m.id !== 'dashboard' &&
                                         !m.superAdminOnly &&
                                         userData?.companyModules?.includes(m.id)
-                                    ).map(m => (
-                                        <td key={m.id} style={{ textAlign: 'center', padding: '1rem' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={isOwner || u.allowedModules?.includes(m.id)}
-                                                disabled={isOwner || !isCompanyOwner || u.uid === userData?.uid}
-                                                onChange={(e) => {
-                                                    const checked = e.target.checked;
-                                                    let allowed = u.allowedModules || [];
-                                                    if (checked) allowed = [...new Set([...allowed, m.id])];
-                                                    else allowed = allowed.filter((id: string) => id !== m.id);
+                                    ).map(m => {
+                                        const hasFullAccess = isOwner || u.role === 'admin';
+                                        return (
+                                            <td key={m.id} style={{ textAlign: 'center', padding: '1rem' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={hasFullAccess || u.allowedModules?.includes(m.id)}
+                                                    disabled={hasFullAccess || (!isCompanyOwner && !isRegularAdmin) || u.uid === userData?.uid}
+                                                    onChange={(e) => {
+                                                        const checked = e.target.checked;
+                                                        let allowed = u.allowedModules || [];
+                                                        if (checked) allowed = [...new Set([...allowed, m.id])];
+                                                        else allowed = allowed.filter((id: string) => id !== m.id);
 
-                                                    const newMemberships = (u.memberships || []).map((ms: any) => ms.companyId === userData?.companyId ? { ...ms, allowedModules: allowed } : ms);
-                                                    updateDoc(doc(db, 'users', u.uid), {
-                                                        allowedModules: allowed,
-                                                        memberships: newMemberships
-                                                    });
-                                                    setUsers(prev => prev.map(usr => usr.uid === u.uid ? { ...usr, allowedModules: allowed, memberships: newMemberships } : usr));
-                                                }}
-                                            />
-                                        </td>
-                                    ))}
+                                                        const newMemberships = (u.memberships || []).map((ms: any) => ms.companyId === userData?.companyId ? { ...ms, allowedModules: allowed } : ms);
+                                                        updateDoc(doc(db, 'users', u.uid), {
+                                                            allowedModules: allowed,
+                                                            memberships: newMemberships
+                                                        });
+                                                        setUsers(prev => prev.map(usr => usr.uid === u.uid ? { ...usr, allowedModules: allowed, memberships: newMemberships } : usr));
+                                                    }}
+                                                />
+                                            </td>
+                                        );
+                                    })}
                                 </tr>
                             );
                         })}

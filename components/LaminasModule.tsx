@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/firebaseConfig';
-import { collection, query, where, getDocs, doc, getDoc, setDoc, writeBatch, arrayUnion, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, setDoc, writeBatch, arrayUnion, limit } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 import {
     Layout,
@@ -271,6 +271,22 @@ const LaminasModule = () => {
         if (!isLinked && foundData?.imageUrl) {
             imageUrl = foundData.imageUrl;
             isLinked = true;
+        }
+
+        // Optimization: If we found an image that wasn't marked, update the DB
+        if (isLinked && finalEan && !foundData?.hasImage) {
+            setDoc(doc(db, 'products', finalEan), {
+                hasImage: true,
+                imageUrl: imageUrl,
+                updatedAt: new Date()
+            }, { merge: true }).catch(err => console.error("Error updating image flag:", err));
+
+            // Also resolve any pending request if it exists
+            updateDoc(doc(db, 'product_requests', finalEan), {
+                status: 'resolved',
+                resolvedAt: new Date(),
+                autoResolved: true
+            }).catch(() => { /* ignore if request doesn't exist */ });
         }
 
         setProducts(prev => {

@@ -10,7 +10,8 @@ import {
     Palette,
     Clock,
     FileText,
-    FlaskConical
+    FlaskConical,
+    CheckSquare
 } from 'lucide-react';
 import { auth } from '../services/firebaseConfig';
 
@@ -51,6 +52,11 @@ const AdminSidebar = () => {
                 <NavLink to="/admin" end className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                     <LayoutDashboard size={20} />
                     <span>Dashboard Global</span>
+                </NavLink>
+
+                <NavLink to="/admin/tarefas" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                    <CheckSquare size={20} />
+                    <span>Tarefas</span>
                 </NavLink>
 
                 <NavLink to="/admin/empresas" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>

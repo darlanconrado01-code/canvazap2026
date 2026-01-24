@@ -16,11 +16,11 @@ const MENU_GROUPS = [
     },
     {
         title: 'Artes & Mídia',
-        items: ['laminas', 'artes-vagas', 'encartes', 'banco-imagens', 'temas']
+        items: ['laminas', 'artes-vagas', 'encartes', 'artes-postagens', 'banco-imagens', 'temas']
     },
     {
         title: 'Administrativo',
-        items: ['crachas', 'usuarios', 'solicitacoes']
+        items: ['crachas', 'usuarios', 'solicitacoes', 'tarefas']
     }
 ];
 
@@ -41,7 +41,7 @@ const Sidebar = () => {
         }
 
         // 2. User level checks
-        if (userData.isOwner) return true; // Owner has access to all company-enabled modules
+        if (userData.isOwner || userData.role === 'admin') return true;
 
         // Basic dashboard access
         if (moduleId === 'dashboard') return true;
