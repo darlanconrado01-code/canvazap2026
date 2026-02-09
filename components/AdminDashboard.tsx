@@ -7,8 +7,13 @@ import {
     Users,
     Building2,
     TrendingUp,
-    Activity
+    Activity,
+    UserPlus,
+    Image as ImageIcon,
+    FileText,
+    ShoppingCart
 } from 'lucide-react';
+import { query, where } from 'firebase/firestore';
 import { MODULES } from './SidebarMenu';
 import { useNavigate } from 'react-router-dom';
 
@@ -16,7 +21,11 @@ const AdminDashboard = () => {
     const { userData } = useAuth();
     const [stats, setStats] = useState({
         activeUsers: 0,
-        totalCompanies: 0
+        totalCompanies: 0,
+        pendingRequests: 0,
+        laminasCreated: 0,
+        encartesGenerated: 0,
+        totalProducts: 0
     });
     const [companies, setCompanies] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -32,9 +41,43 @@ const AdminDashboard = () => {
                 setCompanies(companiesData);
 
                 const usersSnap = await getCountFromServer(collection(db, 'users'));
+
+                // New Stats
+                const pendingSnap = await getCountFromServer(query(collection(db, 'users'), where('status', '==', 'pending')));
+                const laminasSnap = await getDocs(query(collection(db, 'generated_assets'), where('type', '==', 'lamina')));
+                const encartesSnap = await getDocs(query(collection(db, 'generated_assets'), where('type', '==', 'encarte')));
+
+                let totalProd = 0;
+                const companyUsage: { [key: string]: number } = {};
+
+                // Aggregate Usage
+                laminasSnap.forEach(doc => {
+                    const cid = doc.data().companyId;
+                    if (cid) companyUsage[cid] = (companyUsage[cid] || 0) + (doc.data().productCount || 1);
+                });
+
+                encartesSnap.forEach(doc => {
+                    const d = doc.data();
+                    totalProd += (d.productCount || 0);
+                    const cid = d.companyId;
+                    if (cid) companyUsage[cid] = (companyUsage[cid] || 0) + (d.productCount || 1);
+                });
+
+                // Sort companies by usage
+                const sortedCompanies = companiesData.map(c => ({
+                    ...c,
+                    usageCount: companyUsage[c.id] || 0
+                })).sort((a, b) => b.usageCount - a.usageCount);
+
+                setCompanies(sortedCompanies);
+
                 setStats({
                     totalCompanies: companiesData.length,
-                    activeUsers: usersSnap.data().count
+                    activeUsers: usersSnap.data().count,
+                    pendingRequests: pendingSnap.data().count,
+                    laminasCreated: laminasSnap.size,
+                    encartesGenerated: encartesSnap.size,
+                    totalProducts: totalProd
                 });
             } catch (e: any) {
                 console.error("FIRESTORE ERROR (fetchStats AdminDashboard)", {
@@ -66,7 +109,7 @@ const AdminDashboard = () => {
         <div className="fade-in">
             <div style={{ marginBottom: '2rem' }}>
                 <h1 className="title" style={{ fontSize: '1.8rem' }}>Painel de Controle Global 🌎</h1>
-                <p style={{ color: 'var(--text-secondary)' }}>Visão geral de todas as empresas e usuários do sistema CanvaZap.</p>
+                <p style={{ color: 'var(--text-secondary)' }}>Visão geral de todas as empresas e usuários do sistema EcoD3.</p>
             </div>
 
             {/* Stats Grid */}
@@ -100,22 +143,51 @@ const AdminDashboard = () => {
                         <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Média Usuários/Empresa</div>
                     </div>
                 </div>
+                <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.5rem', cursor: 'pointer' }} onClick={() => navigate('/admin/aprovacoes')}>
+                    <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--error-color)' }}>
+                        <UserPlus size={24} />
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1 }}>{stats.pendingRequests}</div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Solicitações de Entrada</div>
+                    </div>
+                </div>
+
+                <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.5rem' }}>
+                    <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B5CF6' }}>
+                        <ImageIcon size={24} />
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1 }}>{stats.laminasCreated}</div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Lâminas Criadas</div>
+                    </div>
+                </div>
+
+                <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.5rem' }}>
+                    <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: 'rgba(14, 165, 233, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0EA5E9' }}>
+                        <FileText size={24} />
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1 }}>{stats.encartesGenerated}</div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Encartes ({stats.totalProducts} produtos)</div>
+                    </div>
+                </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                <h3 className="title" style={{ fontSize: '1.4rem' }}>Empresas Recentes</h3>
+                <h3 className="title" style={{ fontSize: '1.4rem' }}>Empresas que mais usam (Top 10)</h3>
                 <button onClick={() => navigate('/admin/empresas')} className="btn btn-secondary" style={{ width: 'auto', padding: '0.5rem 1rem' }}>
                     Gerenciar Todas as Empresas
                 </button>
             </div>
 
-            <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="glass-card table-responsive" style={{ padding: 0 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
                     <thead>
                         <tr style={{ background: 'var(--bg-color)', borderBottom: '1px solid var(--border-color)' }}>
                             <th style={{ textAlign: 'left', padding: '1rem 1.5rem', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Empresa</th>
-                            <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Código</th>
                             <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Status</th>
+                            <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Uso Total (Assets)</th>
                             <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Módulos</th>
                         </tr>
                     </thead>
@@ -131,7 +203,7 @@ const AdminDashboard = () => {
                                 <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Nenhuma empresa encontrada.</td>
                             </tr>
                         ) : (
-                            companies.slice(0, 5).map(comp => (
+                            companies.slice(0, 10).map(comp => (
                                 <tr key={comp.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                     <td style={{ padding: '1rem 1.5rem' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
@@ -141,7 +213,6 @@ const AdminDashboard = () => {
                                             <span style={{ fontWeight: 600 }}>{comp.name}</span>
                                         </div>
                                     </td>
-                                    <td style={{ padding: '1rem' }}><code>{comp.code}</code></td>
                                     <td style={{ padding: '1rem' }}>
                                         <span style={{
                                             fontSize: '0.75rem',
@@ -153,6 +224,13 @@ const AdminDashboard = () => {
                                         }}>
                                             {comp.status === 'active' ? 'ATIVA' : 'INATIVA'}
                                         </span>
+                                    </td>
+                                    <td style={{ padding: '1rem' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <ShoppingCart size={14} color="var(--primary-color)" />
+                                            <strong>{comp.usageCount || 0}</strong>
+                                            <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>produtos/artes</span>
+                                        </div>
                                     </td>
                                     <td style={{ padding: '1rem' }}>
                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>

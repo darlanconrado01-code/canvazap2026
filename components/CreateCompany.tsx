@@ -78,7 +78,7 @@ const CreateCompany = () => {
 
     return (
         <div className="auth-container">
-            <div className="glass-card fade-in">
+            <div className="glass-card fade-in" style={{ maxWidth: '440px', width: '100%' }}>
                 <button
                     onClick={() => navigate('/onboarding')}
                     style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}

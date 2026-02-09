@@ -6,6 +6,7 @@ import { db } from '../services/firebaseConfig';
 import { collection, query, where, getDocs, updateDoc, doc, arrayUnion, getDoc } from 'firebase/firestore';
 import { KeyRound, ArrowRight, Loader2, ArrowLeft } from 'lucide-react';
 import { CompanyMembership } from './AuthContext';
+import { sendAdminNotification, AdminNotificationType } from '../services/NotificationService';
 
 const JoinCompany = () => {
     const [code, setCode] = useState('');
@@ -84,6 +85,15 @@ const JoinCompany = () => {
             await refreshUserData();
             setSuccess(`Solicitação enviada para ${companyData.name}! Aguarde a aprovação do administrador.`);
 
+            // Notify Admins
+            sendAdminNotification(
+                "Nova Solicitação de Entrada",
+                `O usuário ${userData?.displayName || user.email} solicitou entrar na empresa ${companyData.name}.`,
+                AdminNotificationType.APPROVAL,
+                "/admin/aprovacoes",
+                "CADASTRO"
+            );
+
             // After a delay, maybe go to a "pending" screen or stay here
             setTimeout(() => {
                 navigate('/');
@@ -116,7 +126,7 @@ const JoinCompany = () => {
 
     return (
         <div className="auth-container">
-            <div className="glass-card fade-in">
+            <div className="glass-card fade-in" style={{ maxWidth: '440px', width: '100%' }}>
                 <button
                     onClick={() => navigate('/onboarding')}
                     style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}

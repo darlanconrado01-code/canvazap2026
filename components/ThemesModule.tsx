@@ -1,14 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../services/firebaseConfig';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, where, orderBy, addDoc, limit } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, where, orderBy, addDoc, limit, writeBatch } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
-import { Search, Plus, Edit, Trash2, Image as ImageIcon, Check, X, Globe, Lock, ArrowLeft, Copy, Building2, AlertCircle, Settings, Save, Layout, Type, Grid, ChevronDown } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Image as ImageIcon, Check, X, Globe, Lock, ArrowLeft, Copy, Building2, AlertCircle, Settings, Layout, Type, Grid, ChevronDown, FileEdit, Layers, RefreshCw } from 'lucide-react';
+import { DEFAULT_LAYOUT_CONFIG } from '../constants';
+import { GRID_FORMATS, GridFormatKey } from './FlyerTypes';
+import { GRID_CONFIG_DEFAULTS } from './GridDefaults';
 
 interface Theme {
     id: string;
     name: string;
-    tags: string[];
+    categories: string[]; // Nova: categorias do negócio
+    subcategories: string[]; // Nova: subcategorias do negócio
     backgroundEncartes: string;
     coverUrl?: string;
     isActive: boolean;
@@ -16,50 +21,42 @@ interface Theme {
     isPublic: boolean;
     companyId: string;
     allowedCompanies?: string[]; // Companies that can see this theme (if not public)
-    status: 'active' | 'pending' | 'archived';
+    status: 'active' | 'pending' | 'archived' | 'draft'; // Novo: draft para temas globais não configurados
     createdAt: any;
-    defaultLayoutConfig?: any; // Stores the saved layout configuration
+    defaultLayoutConfig?: any; // Legacy: Stores the saved layout configuration
+    gridConfigs?: {
+        [key in GridFormatKey]?: {
+            layoutConfig: any;
+            isConfigured: boolean;
+        };
+    };
+    defaultPromoMonth?: string;
+    defaultPromoBadge?: string;
+    isConfigured?: boolean; // True if ALL grid formats are configured
+    configuredFormats?: GridFormatKey[]; // List of configured formats
+    inheritedFromCompany?: string; // Nova: se herda categoria da empresa
 }
 
 const ThemesModule = () => {
     const { userData } = useAuth();
+    const navigate = useNavigate();
     const [themes, setThemes] = useState<Theme[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'global'>('all');
+    const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'global' | 'drafts'>('all');
     const [searchTerm, setSearchTerm] = useState('');
-    const [view, setView] = useState<'list' | 'form' | 'settings'>('list');
+    const [view, setView] = useState<'list' | 'form'>('list');
     const [allCompanies, setAllCompanies] = useState<any[]>([]);
-    const [activeThemeForSettings, setActiveThemeForSettings] = useState<Theme | null>(null);
 
     const [editingTheme, setEditingTheme] = useState<Theme | null>(null);
+    const [dbCategories, setDbCategories] = useState<any[]>([]);
 
-    // Layout Config State for Master (Complete Baseline)
-    const [layoutConfig, setLayoutConfig] = useState({
-        columns: 3, rows: 4, gap: 16,
-        marginTop: 180, marginBottom: 100, marginLeft: 20, marginRight: 20,
-        colorDescription: '#000000', colorPrice: '#cc0000', colorCode: '#666666',
-        colorInternalCode: '#666666', colorEan: '#666666', colorPackaging: '#000000',
-        showPriceSeal: true, showInternalCode: true, showEan: false,
-        fontInternalCode: 0.8, fontEan: 0.8, fontSizeDescription: 1.1, fontSizePrice: 2,
-        cardBackgroundMode: 'none', cardOpacity: 0.8, cardRadius: 8, cardPadding: 10,
-        spacingBelowPhoto: 5, spacingBelowDescription: 5, spacingAbovePrice: 5,
-        priceCentsSpacing: 2, photoScale: 1,
-        elementsOrder: ['code', 'description', 'price'], // New: Order of elements
-        logoConfig: { x: 23.5, y: 82, scale: 1.6, visible: true },
-        sideTextConfig: {
-            text: 'Imagens meramente ilustrativas', fontSize: 14, color: '#333333',
-            x: 2, y: 200, scale: 1, rotation: -90, visible: true
-        }
-    });
-
-    const [mockProducts, setMockProducts] = useState([
-        { id: '1', description: 'ARROZ TIPO 1 5KG', price: '29,90', imageUrl: 'https://images.tcdn.com.br/img/img_prod/735623/arroz_agulhinha_tipo_1_camil_5kg_871_1_20200831102941.jpg', code: '1001' },
-        { id: '2', description: 'FEIJÃO CARIOCA 1KG', price: '7,49', imageUrl: 'https://cdn.awsli.com.br/600x450/1183/1183350/produto/166068305/be309a4734.jpg', code: '1002' },
-        { id: '3', description: 'ÓLEO DE SOJA 900ML', price: '6,25', imageUrl: 'https://imagensemoldes.com.br/wp-content/uploads/2020/04/Foto-de-Ol%C3%A9o-de-Soja-Liza-PNG.png', code: '1003' },
-        { id: '4', description: 'LEITE INTEGRAL 1L', price: '4,69', imageUrl: 'https://static.paodeacucar.com.br/img/uploads/1/541/658541.png', code: '1004' },
-        { id: '5', description: 'CAFÉ TORRADO 500G', price: '18,90', imageUrl: 'https://images.tcdn.com.br/img/img_prod/741824/cafe_melitta_tradicional_500g_245_1_20200520163353.jpg', code: '1005' },
-        { id: '6', description: 'AÇÚCAR REFINADO 1KG', price: '4,25', imageUrl: 'https://static.paodeacucar.com.br/img/uploads/1/10/615010.png', code: '1006' }
-    ]);
+    useEffect(() => {
+        const fetchBaseData = async () => {
+            const catSnap = await getDocs(collection(db, 'business_categories'));
+            setDbCategories(catSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        };
+        fetchBaseData();
+    }, []);
 
     useEffect(() => {
         if (userData) {
@@ -70,34 +67,6 @@ const ThemesModule = () => {
         }
     }, [userData?.uid, userData?.companyId, activeTab]);
 
-    useEffect(() => {
-        if (userData && view === 'settings') {
-            fetchRealProductsForPreview();
-        }
-    }, [userData?.uid, view]);
-
-    const fetchRealProductsForPreview = async () => {
-        try {
-            const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(12));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-                const products = snap.docs.map(d => ({
-                    id: d.id,
-                    description: d.data().name || d.data().description,
-                    price: d.data().price || '0,00',
-                    imageUrl: d.data().imageUrl || d.data().photoUrl,
-                    code: d.data().internalCode || ''
-                })).filter(p => p.imageUrl);
-
-                if (products.length > 0) {
-                    setMockProducts(products);
-                }
-            }
-        } catch (err) {
-            console.warn("Usando mock de produtos (erro ao buscar reais):", err);
-        }
-    };
-
     const fetchCompanies = async () => {
         try {
             const snap = await getDocs(collection(db, 'companies'));
@@ -107,17 +76,24 @@ const ThemesModule = () => {
         }
     };
 
+
+
     const fetchThemes = async () => {
         setLoading(true);
         try {
             const themesRef = collection(db, 'themes');
 
             if (activeTab === 'global') {
-                const q = query(themesRef, where('isPublic', '==', true));
+                const q = query(themesRef, where('isPublic', '==', true), where('status', '==', 'active'));
                 const snapshot = await getDocs(q);
                 setThemes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Theme)));
             } else if (activeTab === 'pending') {
                 const q = query(themesRef, where('status', '==', 'pending'));
+                const snapshot = await getDocs(q);
+                setThemes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Theme)));
+            } else if (activeTab === 'drafts') {
+                // Rascunhos: temas globais criados mas ainda não publicados
+                const q = query(themesRef, where('status', '==', 'draft'));
                 const snapshot = await getDocs(q);
                 setThemes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Theme)));
             } else {
@@ -125,7 +101,8 @@ const ThemesModule = () => {
                     const snapshot = await getDocs(themesRef);
                     setThemes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Theme)));
                 } else {
-                    const publicQ = query(themesRef, where('isPublic', '==', true));
+                    // Usuários comuns não veem temas draft
+                    const publicQ = query(themesRef, where('isPublic', '==', true), where('status', '==', 'active'));
                     const myQ = userData?.companyId ? query(themesRef, where('companyId', '==', userData.companyId)) : null;
                     const allowedQ = userData?.companyId ? query(themesRef, where('allowedCompanies', 'array-contains', userData.companyId)) : null;
 
@@ -136,7 +113,13 @@ const ThemesModule = () => {
                     const snapshots = await Promise.all(promises);
                     const merged = new Map();
                     snapshots.forEach(snap => {
-                        snap.docs.forEach(d => merged.set(d.id, { id: d.id, ...d.data() as any }));
+                        snap.docs.forEach(d => {
+                            const data = d.data();
+                            // Filtrar temas em draft (não devem aparecer para usuários comuns)
+                            if (data.status !== 'draft') {
+                                merged.set(d.id, { id: d.id, ...data as any });
+                            }
+                        });
                     });
 
                     setThemes(Array.from(merged.values()) as Theme[]);
@@ -150,40 +133,79 @@ const ThemesModule = () => {
         }
     };
 
-    const handleSaveLayoutPadrão = async () => {
-        if (!activeThemeForSettings) return;
+    const handleMigrateAllThemes = async () => {
+        if (!userData?.isSystemAdmin) return;
+        if (!confirm("⚠️ MUDANÇA CRÍTICA: Deseja aplicar os NOVOS PADRÕES OFICIAIS (1x1, 2x2, 3x2, 3x3, 4x4) em TODOS os temas existentes?\n\nIsso removerá os selos de oferta/mês e ajustará margens, gaps e fontes de todos os temas globais e de empresas.\n\nESTA AÇÃO NÃO PODE SER DESFEITA.")) return;
 
-        // Proteção MASTER: Somente Super Admin altera layout de temas públicos
-        if (activeThemeForSettings.isPublic && !userData?.isSystemAdmin) {
-            alert('Apenas administradores do sistema podem alterar o layout padrão de temas globais.');
-            return;
-        }
-
+        setLoading(true);
         try {
-            await setDoc(doc(db, 'themes', activeThemeForSettings.id), {
-                defaultLayoutConfig: layoutConfig
-            }, { merge: true });
-            alert('Configurações padrão do tema atualizadas!');
-            setView('list');
+            const themesRef = collection(db, 'themes');
+            const snapshot = await getDocs(themesRef);
+
+            let count = 0;
+            const batchSize = 100; // Firestore batch limit is small but let's do simple updates or multiple batches if needed
+            // For simplicity in a script, we can loop and update since we are in a dev/admin tool
+
+            for (const themeDoc of snapshot.docs) {
+                const themeId = themeDoc.id;
+                const themeData = themeDoc.data();
+
+                const updatedGridConfigs: any = {};
+                GRID_FORMATS.forEach(f => {
+                    // Mergear o layoutConfig atual (se existir) com os novos defaults
+                    // Priorizamos os NOVOS DEFAULTS para garantir que as margens e selos mudem
+                    const currentConfig = themeData.gridConfigs?.[f.key]?.layoutConfig || {};
+
+                    updatedGridConfigs[f.key] = {
+                        layoutConfig: {
+                            ...DEFAULT_LAYOUT_CONFIG, // Base
+                            ...currentConfig,        // O que o usuário tinha (cores, background?)
+                            ...(GRID_CONFIG_DEFAULTS[f.key] || {}), // Oficial (Sobrescreve com as novas medidas e remove selos)
+                            columns: f.columns,
+                            rows: f.rows,
+                            // Manter cores se já existiam
+                            colorDescription: currentConfig.colorDescription || themeData.defaultLayoutConfig?.colorDescription || DEFAULT_LAYOUT_CONFIG.colorDescription,
+                            colorPrice: currentConfig.colorPrice || themeData.defaultLayoutConfig?.colorPrice || DEFAULT_LAYOUT_CONFIG.colorPrice,
+                            colorInternalCode: currentConfig.colorInternalCode || themeData.defaultLayoutConfig?.colorInternalCode || DEFAULT_LAYOUT_CONFIG.colorInternalCode,
+                            colorEan: currentConfig.colorEan || themeData.defaultLayoutConfig?.colorEan || DEFAULT_LAYOUT_CONFIG.colorEan,
+                        },
+                        isConfigured: true
+                    };
+                });
+
+                await setDoc(doc(db, 'themes', themeId), {
+                    gridConfigs: updatedGridConfigs,
+                    configuredFormats: GRID_FORMATS.map(f => f.key),
+                    isConfigured: true,
+                    updatedAt: new Date()
+                }, { merge: true });
+                count++;
+            }
+
+            alert(`✅ Sucesso! ${count} temas foram migrados para o novo padrão oficial.`);
             fetchThemes();
-        } catch (err) {
-            console.error(err);
-            alert('Erro ao salvar ajustes');
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao processar migração.");
+        } finally {
+            setLoading(false);
         }
     };
 
     // Form State
     const [formData, setFormData] = useState({
-        name: '', tags: '', backgroundEncartes: '',
-        coverUrl: '', isActive: true, availability: [] as string[],
-        isPublic: false, allowedCompanies: [] as string[]
+        name: '', categories: [] as string[], subcategories: [] as string[],
+        backgroundEncartes: '', coverUrl: '', isActive: true, availability: [] as string[],
+        isPublic: false, allowedCompanies: [] as string[],
+        defaultPromoMonth: '', defaultPromoBadge: '', inheritedFromCompany: ''
     });
 
     const resetForm = () => {
         setFormData({
-            name: '', tags: '', backgroundEncartes: '',
-            coverUrl: '', isActive: true, availability: [],
-            isPublic: false, allowedCompanies: []
+            name: '', categories: [], subcategories: [],
+            backgroundEncartes: '', coverUrl: '', isActive: true, availability: [],
+            isPublic: false, allowedCompanies: [],
+            defaultPromoMonth: '', defaultPromoBadge: '', inheritedFromCompany: ''
         });
         setEditingTheme(null);
     };
@@ -193,12 +215,19 @@ const ThemesModule = () => {
             const themeId = editingTheme ? editingTheme.id : `theme_${Date.now()}`;
 
             // Lógica de Status e Publicidade
+            // NOVO: Temas globais criados pelo SuperAdmin começam como RASCUNHO (draft)
             let finalIsPublic = false;
-            let finalStatus: 'active' | 'pending' | 'archived' = 'active';
+            let finalStatus: 'active' | 'pending' | 'archived' | 'draft' = 'active';
 
             if (userData?.isSystemAdmin) {
                 finalIsPublic = formData.isPublic;
-                finalStatus = 'active';
+                // Se é um novo tema global, começa como RASCUNHO
+                if (!editingTheme && formData.isPublic) {
+                    finalStatus = 'draft';
+                    finalIsPublic = false; // Não fica público até aprovar
+                } else {
+                    finalStatus = 'active';
+                }
             } else {
                 if (formData.isPublic) {
                     finalStatus = 'pending';
@@ -209,9 +238,19 @@ const ThemesModule = () => {
                 }
             }
 
+            // Herda categorias da empresa se for tema específico
+            let finalCategories = formData.categories;
+            let finalSubcategories = formData.subcategories;
+            if (!formData.isPublic && formData.inheritedFromCompany) {
+                const company = allCompanies.find(c => c.id === formData.inheritedFromCompany);
+                if (company?.category) finalCategories = [company.category];
+                if (company?.subcategory) finalSubcategories = [company.subcategory];
+            }
+
             const themeData: any = {
                 name: formData.name,
-                tags: formData.tags.split(',').map(t => t.trim()).filter(t => t),
+                categories: finalCategories,
+                subcategories: finalSubcategories,
                 backgroundEncartes: formData.backgroundEncartes,
                 coverUrl: formData.coverUrl,
                 isActive: formData.isActive,
@@ -219,12 +258,32 @@ const ThemesModule = () => {
                 isPublic: finalIsPublic,
                 status: finalStatus,
                 allowedCompanies: formData.allowedCompanies,
+                defaultPromoMonth: formData.defaultPromoMonth,
+                defaultPromoBadge: formData.defaultPromoBadge,
+                isConfigured: editingTheme ? (editingTheme.isConfigured ?? true) : !formData.isPublic,
+                inheritedFromCompany: formData.inheritedFromCompany || null,
                 updatedAt: new Date()
             };
 
             if (!editingTheme) {
                 themeData.createdAt = new Date();
                 themeData.companyId = userData?.companyId;
+
+                // NOVO: Inicializar com os 5 formatos padrão oficiais
+                themeData.gridConfigs = {};
+                GRID_FORMATS.forEach(f => {
+                    themeData.gridConfigs[f.key] = {
+                        layoutConfig: {
+                            ...DEFAULT_LAYOUT_CONFIG,
+                            ...(GRID_CONFIG_DEFAULTS[f.key] || {}),
+                            columns: f.columns,
+                            rows: f.rows
+                        },
+                        isConfigured: true
+                    };
+                });
+                themeData.configuredFormats = GRID_FORMATS.map(f => f.key);
+                themeData.isConfigured = true;
             }
 
             await setDoc(doc(db, 'themes', themeId), themeData, { merge: true });
@@ -243,7 +302,7 @@ const ThemesModule = () => {
         if (!userData?.isSystemAdmin) return;
         if (!confirm(`Deseja aprovar o tema "${theme.name}" para ser Global?`)) return;
         try {
-            await setDoc(doc(db, 'themes', theme.id), { status: 'active', isPublic: true, updatedAt: new Date() }, { merge: true });
+            await setDoc(doc(db, 'themes', theme.id), { status: 'active', isPublic: true, isConfigured: false, updatedAt: new Date() }, { merge: true });
             alert('Tema aprovado e agora é GLOBAL!');
             fetchThemes();
         } catch (error) {
@@ -262,6 +321,39 @@ const ThemesModule = () => {
         } catch (error) {
             console.error(error);
             alert('Erro ao processar rejeição.');
+        }
+    };
+
+    // Publicar tema rascunho
+    const handlePublishDraft = async (theme: Theme) => {
+        if (!userData?.isSystemAdmin) return;
+        if (theme.status !== 'draft') return;
+
+        // Verificar se TODOS os 5 formatos estão configurados
+        const configuredCount = theme.configuredFormats?.length || 0;
+        const totalFormats = GRID_FORMATS.length; // 5
+
+        if (configuredCount < totalFormats) {
+            alert(`O tema "${theme.name}" ainda não tem todos os formatos configurados.\n\nConfigurados: ${configuredCount}/${totalFormats}\n\nPor favor, configure todos os formatos (1x1, 2x2, 3x2, 3x3, 4x4) antes de publicar.`);
+            return;
+        }
+
+        if (!confirm(`Deseja publicar o tema "${theme.name}"? Ele ficará disponível para todas as empresas com todos os ${totalFormats} formatos configurados.`)) {
+            return;
+        }
+
+        try {
+            await setDoc(doc(db, 'themes', theme.id), {
+                status: 'active',
+                isPublic: true,
+                isConfigured: true,
+                updatedAt: new Date()
+            }, { merge: true });
+            alert('Tema publicado com sucesso! Agora está disponível para todos.');
+            fetchThemes();
+        } catch (error) {
+            console.error(error);
+            alert('Erro ao publicar tema.');
         }
     };
 
@@ -285,22 +377,43 @@ const ThemesModule = () => {
     const openEdit = (theme: Theme) => {
         setEditingTheme(theme);
         setFormData({
-            name: theme.name, tags: theme.tags.join(', '),
+            name: theme.name,
+            categories: theme.categories || [],
+            subcategories: theme.subcategories || [],
             backgroundEncartes: theme.backgroundEncartes,
             coverUrl: theme.coverUrl || '',
             isActive: theme.isActive !== undefined ? theme.isActive : true,
-            availability: theme.availability, isPublic: theme.isPublic,
-            allowedCompanies: theme.allowedCompanies || []
+            availability: theme.availability,
+            isPublic: theme.isPublic,
+            allowedCompanies: theme.allowedCompanies || [],
+            defaultPromoMonth: theme.defaultPromoMonth || '',
+            defaultPromoBadge: theme.defaultPromoBadge || '',
+            inheritedFromCompany: theme.inheritedFromCompany || ''
         });
         setView('form');
     };
 
+    // State para modal de seleção de formato
+    const [showFormatModal, setShowFormatModal] = useState(false);
+    const [formatModalTheme, setFormatModalTheme] = useState<Theme | null>(null);
+
     const openSettings = (theme: Theme) => {
-        setActiveThemeForSettings(theme);
-        if (theme.defaultLayoutConfig) {
-            setLayoutConfig({ ...layoutConfig, ...theme.defaultLayoutConfig, elementsOrder: theme.defaultLayoutConfig.elementsOrder || ['code', 'description', 'price'] });
+        // Para temas em draft, mostrar modal de seleção de formato
+        if (theme.status === 'draft' && userData?.isSystemAdmin) {
+            setFormatModalTheme(theme);
+            setShowFormatModal(true);
+        } else {
+            // Para outros temas, ir direto para configuração (comportamento antigo)
+            navigate(`/admin/encartes?themeId=${theme.id}`);
         }
-        setView('settings');
+    };
+
+    const handleSelectFormat = (formatKey: GridFormatKey) => {
+        if (!formatModalTheme) return;
+        // Navega para encartes passando tema E formato específico
+        navigate(`/admin/encartes?themeId=${formatModalTheme.id}&gridFormat=${formatKey}`);
+        setShowFormatModal(false);
+        setFormatModalTheme(null);
     };
 
     const handleCreate = () => { resetForm(); setView('form'); }
@@ -312,14 +425,16 @@ const ThemesModule = () => {
         try {
             const newThemeData = {
                 name: `${theme.name} (Cópia)`,
-                tags: theme.tags || [],
+                categories: theme.categories || [],
+                subcategories: theme.subcategories || [],
                 backgroundEncartes: theme.backgroundEncartes || '',
                 coverUrl: theme.coverUrl || '',
                 isActive: theme.isActive ?? true,
                 availability: theme.availability || [],
                 companyId: userData.companyId, isPublic: false,
                 status: 'active', createdAt: new Date(), updatedAt: new Date(),
-                defaultLayoutConfig: theme.defaultLayoutConfig || {}
+                defaultLayoutConfig: theme.defaultLayoutConfig || {},
+                isConfigured: true
             };
             await addDoc(collection(db, 'themes'), newThemeData);
             alert('Tema duplicado com sucesso!');
@@ -332,248 +447,10 @@ const ThemesModule = () => {
 
     const filteredThemes = themes.filter(t =>
         t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+        (t.categories || []).some(cat => cat.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (t.subcategories || []).some(sub => sub.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
-    if (view === 'settings') {
-        return (
-            <div className="fade-in">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <button onClick={() => setView('list')} className="btn-icon" style={{ background: 'var(--surface-color)', border: '1px solid var(--border-color)' }}>
-                            <ArrowLeft size={20} />
-                        </button>
-                        <div>
-                            <h1 className="title" style={{ marginBottom: 0 }}>Ajustes de Layout: {activeThemeForSettings?.name}</h1>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Defina o padrão visual deste tema para todas as empresas.</p>
-                        </div>
-                    </div>
-                    <button className="btn btn-primary" onClick={handleSaveLayoutPadrão}><Save size={18} /> Salvar Padrão Global</button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: '2rem', height: 'calc(100vh - 250px)' }}>
-                    <div className="glass-card" style={{ overflowY: 'auto', padding: '1rem', scrollbarWidth: 'thin' }}>
-                        <div style={{ display: 'grid', gap: '0.5rem' }}>
-                            <details className="settings-group" open>
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Cores</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    {[
-                                        { label: 'Descrição', key: 'colorDescription' },
-                                        { label: 'Preço', key: 'colorPrice' },
-                                        { label: 'Cód. Interno', key: 'colorInternalCode' },
-                                        { label: 'EAN', key: 'colorEan' }
-                                    ].map(item => (
-                                        <div key={item.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <label style={{ fontSize: '0.9rem', color: '#444' }}>{item.label}</label>
-                                            <input
-                                                type="color"
-                                                value={(layoutConfig as any)[item.key]}
-                                                onChange={e => setLayoutConfig({ ...layoutConfig, [item.key]: e.target.value })}
-                                                style={{ width: '40px', height: '24px', border: '1px solid #ddd', cursor: 'pointer', padding: '2px', background: 'white' }}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            </details>
-
-                            {/* Section: Ordem dos Elementos */}
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Ordem dos Textos</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                        {(layoutConfig.elementsOrder || ['code', 'description', 'price']).map((item, index) => (
-                                            <div
-                                                key={item}
-                                                style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '12px',
-                                                    background: 'var(--surface-color)',
-                                                    padding: '8px 12px',
-                                                    borderRadius: '8px',
-                                                    border: '1px solid var(--border-color)'
-                                                }}
-                                            >
-                                                <Grid size={14} color="var(--text-muted)" />
-                                                <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 500 }}>
-                                                    {item === 'code' ? 'Códigos (Cód/EAN)' : item === 'description' ? 'Descrição' : 'Preço Principal'}
-                                                </span>
-                                                <div style={{ display: 'flex', gap: '4px' }}>
-                                                    <button
-                                                        disabled={index === 0}
-                                                        onClick={() => {
-                                                            const nextOrder = [...(layoutConfig.elementsOrder || [])];
-                                                            const temp = nextOrder[index];
-                                                            nextOrder[index] = nextOrder[index - 1];
-                                                            nextOrder[index - 1] = temp;
-                                                            setLayoutConfig({ ...layoutConfig, elementsOrder: nextOrder });
-                                                        }}
-                                                        className="btn-icon" style={{ width: 22, height: 22, padding: 0, opacity: index === 0 ? 0.3 : 1 }}
-                                                    >
-                                                        <ChevronDown size={14} style={{ transform: 'rotate(180deg)' }} />
-                                                    </button>
-                                                    <button
-                                                        disabled={index === (layoutConfig.elementsOrder?.length || 3) - 1}
-                                                        onClick={() => {
-                                                            const nextOrder = [...(layoutConfig.elementsOrder || [])];
-                                                            const temp = nextOrder[index];
-                                                            nextOrder[index] = nextOrder[index + 1];
-                                                            nextOrder[index + 1] = temp;
-                                                            setLayoutConfig({ ...layoutConfig, elementsOrder: nextOrder });
-                                                        }}
-                                                        className="btn-icon" style={{ width: 22, height: 22, padding: 0, opacity: index === ((layoutConfig.elementsOrder?.length || 3) - 1) ? 0.3 : 1 }}
-                                                    >
-                                                        <ChevronDown size={14} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                                        Mova os itens para definir a prioridade visual.
-                                    </p>
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Layout (Grade e Margens)</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                        <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Colunas</label><input type="number" className="form-input" value={layoutConfig.columns} onChange={e => setLayoutConfig({ ...layoutConfig, columns: Number(e.target.value) })} /></div>
-                                        <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Linhas</label><input type="number" className="form-input" value={layoutConfig.rows} onChange={e => setLayoutConfig({ ...layoutConfig, rows: Number(e.target.value) })} /></div>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                        <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Topo</label><input type="number" className="form-input" value={layoutConfig.marginTop} onChange={e => setLayoutConfig({ ...layoutConfig, marginTop: Number(e.target.value) })} /></div>
-                                        <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Base</label><input type="number" className="form-input" value={layoutConfig.marginBottom} onChange={e => setLayoutConfig({ ...layoutConfig, marginBottom: Number(e.target.value) })} /></div>
-                                        <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Esq</label><input type="number" className="form-input" value={layoutConfig.marginLeft} onChange={e => setLayoutConfig({ ...layoutConfig, marginLeft: Number(e.target.value) })} /></div>
-                                        <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Dir</label><input type="number" className="form-input" value={layoutConfig.marginRight} onChange={e => setLayoutConfig({ ...layoutConfig, marginRight: Number(e.target.value) })} /></div>
-                                    </div>
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Espaçamentos (Card)</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Gap Grade (px)</label><input type="number" className="form-input" value={layoutConfig.gap} onChange={e => setLayoutConfig({ ...layoutConfig, gap: Number(e.target.value) })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Abaixo Foto (px)</label><input type="number" className="form-input" value={layoutConfig.spacingBelowPhoto} onChange={e => setLayoutConfig({ ...layoutConfig, spacingBelowPhoto: Number(e.target.value) })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Abaixo Descrição (px)</label><input type="number" className="form-input" value={layoutConfig.spacingBelowDescription} onChange={e => setLayoutConfig({ ...layoutConfig, spacingBelowDescription: Number(e.target.value) })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Acima Preço (px)</label><input type="number" className="form-input" value={layoutConfig.spacingAbovePrice} onChange={e => setLayoutConfig({ ...layoutConfig, spacingAbovePrice: Number(e.target.value) })} /></div>
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Ajustes da Foto</summary>
-                                <div style={{ padding: '1rem' }}>
-                                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Escala (%): {Math.round(layoutConfig.photoScale * 100)}</label>
-                                    <input type="range" min="0.1" max="1.5" step="0.05" value={layoutConfig.photoScale} onChange={e => setLayoutConfig({ ...layoutConfig, photoScale: Number(e.target.value) })} style={{ width: '100%' }} />
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Ajustes do Preço</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><label>Selo Visível</label><input type="checkbox" checked={layoutConfig.showPriceSeal} onChange={e => setLayoutConfig({ ...layoutConfig, showPriceSeal: e.target.checked })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Tam. Fonte Preço (rem)</label><input type="number" step="0.1" className="form-input" value={layoutConfig.fontSizePrice} onChange={e => setLayoutConfig({ ...layoutConfig, fontSizePrice: Number(e.target.value) })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Tam. Fonte Descrição (rem)</label><input type="number" step="0.1" className="form-input" value={layoutConfig.fontSizeDescription} onChange={e => setLayoutConfig({ ...layoutConfig, fontSizeDescription: Number(e.target.value) })} /></div>
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Ajustes dos Códigos</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><label>Cód. Interno</label><input type="checkbox" checked={layoutConfig.showInternalCode} onChange={e => setLayoutConfig({ ...layoutConfig, showInternalCode: e.target.checked })} /></div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><label>EAN</label><input type="checkbox" checked={layoutConfig.showEan} onChange={e => setLayoutConfig({ ...layoutConfig, showEan: e.target.checked })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Fonte Cód. (rem)</label><input type="number" step="0.1" className="form-input" value={layoutConfig.fontInternalCode} onChange={e => setLayoutConfig({ ...layoutConfig, fontInternalCode: Number(e.target.value) })} /></div>
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Fundo do Card</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Modo</label><select className="form-input" value={layoutConfig.cardBackgroundMode} onChange={e => setLayoutConfig({ ...layoutConfig, cardBackgroundMode: e.target.value })}><option value="none">Nenhum</option><option value="white">Branco</option><option value="gradient">Gradiente</option><option value="glass">Glass</option></select></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Opacidade: {layoutConfig.cardOpacity}</label><input type="range" min="0" max="1" step="0.1" value={layoutConfig.cardOpacity} onChange={e => setLayoutConfig({ ...layoutConfig, cardOpacity: Number(e.target.value) })} style={{ width: '100%' }} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Radius</label><input type="number" className="form-input" value={layoutConfig.cardRadius} onChange={e => setLayoutConfig({ ...layoutConfig, cardRadius: Number(e.target.value) })} /></div>
-                                    <div><label className="form-label" style={{ fontSize: '0.8rem' }}>Padding</label><input type="number" className="form-input" value={layoutConfig.cardPadding} onChange={e => setLayoutConfig({ ...layoutConfig, cardPadding: Number(e.target.value) })} /></div>
-                                </div>
-                            </details>
-
-                            <details className="settings-group">
-                                <summary style={{ fontWeight: 600, padding: '10px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}>Camadas (Globais)</summary>
-                                <div style={{ padding: '1rem', display: 'grid', gap: '1rem' }}>
-                                    <div style={{ borderBottom: '1px solid #eee', paddingBottom: '1rem' }}>
-                                        <h5 style={{ marginBottom: '0.5rem' }}>Logo</h5>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><label>Visível</label><input type="checkbox" checked={layoutConfig.logoConfig.visible} onChange={e => setLayoutConfig({ ...layoutConfig, logoConfig: { ...layoutConfig.logoConfig, visible: e.target.checked } })} /></div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '5px' }}>
-                                            <input type="number" className="form-input" placeholder="X" value={layoutConfig.logoConfig.x} onChange={e => setLayoutConfig({ ...layoutConfig, logoConfig: { ...layoutConfig.logoConfig, x: Number(e.target.value) } })} />
-                                            <input type="number" className="form-input" placeholder="Y" value={layoutConfig.logoConfig.y} onChange={e => setLayoutConfig({ ...layoutConfig, logoConfig: { ...layoutConfig.logoConfig, y: Number(e.target.value) } })} />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h5 style={{ marginBottom: '0.5rem' }}>Texto Lateral</h5>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><label>Visível</label><input type="checkbox" checked={layoutConfig.sideTextConfig.visible} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, visible: e.target.checked } })} /></div>
-                                        <input type="text" className="form-input" style={{ marginTop: '5px' }} value={layoutConfig.sideTextConfig.text} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, text: e.target.value } })} />
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '5px' }}>
-                                            <input type="number" className="form-input" placeholder="Rot" value={layoutConfig.sideTextConfig.rotation} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, rotation: Number(e.target.value) } })} />
-                                            <input type="number" className="form-input" placeholder="Tam" value={layoutConfig.sideTextConfig.fontSize} onChange={e => setLayoutConfig({ ...layoutConfig, sideTextConfig: { ...layoutConfig.sideTextConfig, fontSize: Number(e.target.value) } })} />
-                                        </div>
-                                    </div>
-                                </div>
-                            </details>
-                        </div>
-                    </div>
-
-                    <div style={{ padding: '2rem', background: '#333', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: '12px' }}>
-                        <div style={{ position: 'relative', width: '500px', height: '707px', background: 'white', overflow: 'hidden' }}>
-                            {activeThemeForSettings?.backgroundEncartes && <img src={activeThemeForSettings.backgroundEncartes} style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute' }} />}
-                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, paddingTop: `${(layoutConfig.marginTop / 10)}%`, paddingBottom: `${(layoutConfig.marginBottom / 10)}%`, paddingLeft: `${(layoutConfig.marginLeft / 10)}%`, paddingRight: `${(layoutConfig.marginRight / 10)}%` }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${layoutConfig.columns}, 1fr)`, gridTemplateRows: `repeat(${layoutConfig.rows}, 1fr)`, gap: `${layoutConfig.gap / 4}px`, width: '100%', height: '100%' }}>
-                                    {Array.from({ length: layoutConfig.columns * layoutConfig.rows }).map((_, i) => {
-                                        const p = mockProducts[i % mockProducts.length];
-                                        return (
-                                            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: `${layoutConfig.cardPadding / 2}px`, background: layoutConfig.cardBackgroundMode === 'white' ? `rgba(255,255,255,${layoutConfig.cardOpacity})` : layoutConfig.cardBackgroundMode === 'gradient' ? `linear-gradient(transparent, rgba(255,255,255,${layoutConfig.cardOpacity}))` : 'transparent', borderRadius: `${layoutConfig.cardRadius}px` }}>
-                                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', marginBottom: `${layoutConfig.spacingBelowPhoto / 2}px` }}>
-                                                    <img src={p.imageUrl} style={{ maxWidth: '80%', maxHeight: '100%', transform: `scale(${layoutConfig.photoScale})` }} />
-                                                </div>
-
-                                                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                                    {layoutConfig.elementsOrder.map(element => {
-                                                        if (element === 'code' && layoutConfig.showInternalCode) {
-                                                            return (
-                                                                <div key="code" style={{ color: layoutConfig.colorInternalCode, fontSize: `${layoutConfig.fontInternalCode * 6}px`, fontWeight: 500, marginBottom: '2px' }}>
-                                                                    Cód: {p.code}
-                                                                </div>
-                                                            );
-                                                        }
-                                                        if (element === 'description') {
-                                                            return (
-                                                                <div key="desc" style={{ color: layoutConfig.colorDescription, fontSize: `${layoutConfig.fontSizeDescription * 8}px`, fontWeight: 700, textAlign: 'center', marginBottom: `${layoutConfig.spacingBelowDescription / 2}px` }}>
-                                                                    {p.description}
-                                                                </div>
-                                                            );
-                                                        }
-                                                        if (element === 'price' && p.price) {
-                                                            return (
-                                                                <div key="price" style={{ color: layoutConfig.colorPrice, fontWeight: 900, fontSize: `${layoutConfig.fontSizePrice * 15}px`, marginTop: `${layoutConfig.spacingAbovePrice / 2}px` }}>
-                                                                    R$ {p.price}
-                                                                </div>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                            {layoutConfig.logoConfig.visible && <div style={{ position: 'absolute', left: `${layoutConfig.logoConfig.x}%`, top: `${layoutConfig.logoConfig.y}%`, transform: `translate(-50%, -50%) scale(${layoutConfig.logoConfig.scale})` }}><img src="https://i.imgur.com/wxbwuwF.png" style={{ width: '80px' }} /></div>}
-                            {layoutConfig.sideTextConfig.visible && <div style={{ position: 'absolute', left: `${layoutConfig.sideTextConfig.x}%`, top: `${layoutConfig.sideTextConfig.y}%`, transform: `rotate(${layoutConfig.sideTextConfig.rotation}deg)`, fontSize: '8px', color: layoutConfig.sideTextConfig.color }}>{layoutConfig.sideTextConfig.text}</div>}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     if (view === 'form') {
         return (
@@ -585,7 +462,121 @@ const ThemesModule = () => {
                 <div className="glass-card" style={{ maxWidth: '800px', margin: '0 auto', padding: '2rem' }}>
                     <div style={{ display: 'grid', gap: '1.5rem' }}>
                         <div><label className="form-label">Nome</label><input className="form-input" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} /></div>
-                        <div><label className="form-label">Tag</label><input className="form-input" value={formData.tags} onChange={e => setFormData({ ...formData, tags: e.target.value })} /></div>
+                        <div>
+                            <label className="form-label" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Building2 size={16} /> Categorias do Tema
+                            </label>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                                {formData.isPublic ? 'Para temas globais, selecione uma ou mais categorias de negócio.' : 'Para temas específicos, a categoria pode ser herdada da empresa.'}
+                            </p>
+
+                            {/* Categorias Selecionadas */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                                {formData.categories.map(cat => (
+                                    <span key={cat} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--primary-color)', color: 'white', padding: '4px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 600 }}>
+                                        {cat}
+                                        <X size={14} style={{ cursor: 'pointer' }} onClick={() => setFormData({ ...formData, categories: formData.categories.filter(c => c !== cat) })} />
+                                    </span>
+                                ))}
+                            </div>
+
+                            {/* Seleção de Categorias */}
+                            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                    {dbCategories.map(cat => {
+                                        const isSelected = formData.categories.includes(cat.name);
+                                        return (
+                                            <button
+                                                key={cat.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (isSelected) {
+                                                        setFormData({ ...formData, categories: formData.categories.filter(c => c !== cat.name) });
+                                                    } else {
+                                                        setFormData({ ...formData, categories: [...formData.categories, cat.name] });
+                                                    }
+                                                }}
+                                                style={{
+                                                    background: isSelected ? 'var(--primary-color)' : 'white',
+                                                    color: isSelected ? 'white' : '#64748b',
+                                                    border: `1px solid ${isSelected ? 'var(--primary-color)' : '#e2e8f0'}`,
+                                                    padding: '6px 12px',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.85rem',
+                                                    cursor: 'pointer',
+                                                    fontWeight: isSelected ? 600 : 400,
+                                                    transition: 'all 0.2s'
+                                                }}
+                                            >
+                                                {isSelected ? '✓ ' : ''}{cat.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Subcategorias Selecionadas */}
+                            <label className="form-label" style={{ fontWeight: 600, marginTop: '8px' }}>Subcategorias (opcional)</label>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                                {formData.subcategories.map(sub => (
+                                    <span key={sub} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#2563eb', color: 'white', padding: '4px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 600 }}>
+                                        {sub}
+                                        <X size={14} style={{ cursor: 'pointer' }} onClick={() => setFormData({ ...formData, subcategories: formData.subcategories.filter(s => s !== sub) })} />
+                                    </span>
+                                ))}
+                            </div>
+
+                            {/* Seleção de Subcategorias baseada nas categorias selecionadas */}
+                            {formData.categories.length > 0 && (
+                                <div style={{ background: '#eff6ff', borderRadius: '8px', padding: '12px', border: '1px solid #dbeafe' }}>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {dbCategories
+                                            .filter(cat => formData.categories.includes(cat.name))
+                                            .flatMap(c => c.subcategories || [])
+                                            .filter((sub, i, arr) => arr.indexOf(sub) === i) // Remove duplicates
+                                            .map(sub => {
+                                                const isSelected = formData.subcategories.includes(sub);
+                                                return (
+                                                    <button
+                                                        key={sub}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (isSelected) {
+                                                                setFormData({ ...formData, subcategories: formData.subcategories.filter(s => s !== sub) });
+                                                            } else {
+                                                                setFormData({ ...formData, subcategories: [...formData.subcategories, sub] });
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            background: isSelected ? '#2563eb' : 'white',
+                                                            color: isSelected ? 'white' : '#2563eb',
+                                                            border: `1px solid ${isSelected ? '#2563eb' : '#dbeafe'}`,
+                                                            padding: '4px 10px',
+                                                            borderRadius: '4px',
+                                                            fontSize: '0.75rem',
+                                                            cursor: 'pointer',
+                                                            fontWeight: isSelected ? 600 : 400
+                                                        }}
+                                                    >
+                                                        {isSelected ? '✓ ' : ''}{sub}
+                                                    </button>
+                                                );
+                                            })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                            <div>
+                                <label className="form-label">Mês Padrão (Opcional)</label>
+                                <input className="form-input" placeholder="Ex: Mês de Janeiro" value={formData.defaultPromoMonth} onChange={e => setFormData({ ...formData, defaultPromoMonth: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="form-label">Dia/Selo Padrão (Opcional)</label>
+                                <input className="form-input" placeholder="Ex: Terça da Carne" value={formData.defaultPromoBadge} onChange={e => setFormData({ ...formData, defaultPromoBadge: e.target.value })} />
+                            </div>
+                        </div>
+
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
                             <div>
                                 <label className="form-label">Fundo Encarte (URL)</label>
@@ -743,22 +734,248 @@ const ThemesModule = () => {
 
     return (
         <div className="fade-in">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <h1 className="title">Gerenciamento de Temas</h1>
-                <button className="btn btn-primary" onClick={handleCreate}><Plus size={18} /> Novo Tema</button>
+            {/* Modal de Seleção de Formato */}
+            {showFormatModal && formatModalTheme && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1000
+                }}>
+                    <div style={{
+                        background: 'white',
+                        borderRadius: '16px',
+                        padding: '2rem',
+                        maxWidth: '500px',
+                        width: '95%',
+                        boxShadow: '0 25px 50px rgba(0,0,0,0.3)'
+                    }}>
+                        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                            <div style={{
+                                width: '60px',
+                                height: '60px',
+                                borderRadius: '50%',
+                                background: '#eff6ff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                margin: '0 auto 1rem'
+                            }}>
+                                <Grid size={28} color="var(--primary-color)" />
+                            </div>
+                            <h2 style={{ margin: 0, color: '#1f2937' }}>Configurar Formato</h2>
+                            <p style={{ color: '#6b7280', marginTop: '0.5rem', fontSize: '0.9rem' }}>
+                                Selecione o formato que deseja configurar para o tema <strong>"{formatModalTheme.name}"</strong>
+                            </p>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '1.5rem' }}>
+                            {GRID_FORMATS.map(format => {
+                                const isConfigured = formatModalTheme.configuredFormats?.includes(format.key);
+                                return (
+                                    <button
+                                        key={format.key}
+                                        onClick={() => handleSelectFormat(format.key)}
+                                        style={{
+                                            padding: '12px 8px',
+                                            borderRadius: '12px',
+                                            border: isConfigured ? '2px solid #10b981' : '2px solid #e5e7eb',
+                                            background: isConfigured ? '#ecfdf5' : 'white',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            position: 'relative'
+                                        }}
+                                    >
+                                        {isConfigured && (
+                                            <div style={{
+                                                position: 'absolute',
+                                                top: '-6px',
+                                                right: '-6px',
+                                                background: '#10b981',
+                                                borderRadius: '50%',
+                                                width: '18px',
+                                                height: '18px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center'
+                                            }}>
+                                                <Check size={12} color="white" />
+                                            </div>
+                                        )}
+                                        <div style={{ fontWeight: 700, fontSize: '1.1rem', color: isConfigured ? '#059669' : '#1f2937' }}>
+                                            {format.label}
+                                        </div>
+                                        <div style={{ fontSize: '0.7rem', color: '#6b7280', marginTop: '4px' }}>
+                                            {format.items} itens
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div style={{
+                            background: '#fef3c7',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            marginBottom: '1.5rem',
+                            fontSize: '0.85rem',
+                            color: '#92400e',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}>
+                            <AlertCircle size={18} />
+                            <span>Configure todos os 5 formatos antes de publicar o tema.</span>
+                        </div>
+
+                        <button
+                            onClick={() => { setShowFormatModal(false); setFormatModalTheme(null); }}
+                            style={{
+                                width: '100%',
+                                padding: '12px',
+                                borderRadius: '8px',
+                                border: '1px solid #e5e7eb',
+                                background: 'white',
+                                color: '#6b7280',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                <h1 className="title" style={{ margin: 0 }}>Gerenciamento de Temas</h1>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                    {userData?.isSystemAdmin && (
+                        <button
+                            className="btn"
+                            onClick={handleMigrateAllThemes}
+                            style={{
+                                background: '#f0fdf4',
+                                border: '1px solid #bbf7d0',
+                                color: '#166534',
+                                padding: '8px 16px',
+                                fontSize: '0.85rem',
+                                fontWeight: 700,
+                                gap: '8px'
+                            }}
+                        >
+                            <RefreshCw size={16} />
+                            Migrar TODOS os Temas (Oficial)
+                        </button>
+                    )}
+                    <button className="btn btn-primary" onClick={handleCreate}><Plus size={18} /> Novo Tema</button>
+                </div>
             </div>
             <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '2rem', borderBottom: '1px solid #eee' }}>
-                {['all', 'pending', 'global'].map(t => (
-                    <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '10px 0', border: 'none', background: 'none', borderBottom: activeTab === t ? '2px solid var(--primary-color)' : 'none', color: activeTab === t ? 'var(--primary-color)' : '#666', cursor: 'pointer' }}>{t.toUpperCase()}</button>
+                {[
+                    { key: 'all', label: 'TODOS' },
+                    { key: 'drafts', label: 'RASCUNHOS' },
+                    { key: 'pending', label: 'PENDENTES' },
+                    { key: 'global', label: 'GLOBAIS' }
+                ].map(t => (
+                    <button
+                        key={t.key}
+                        onClick={() => setActiveTab(t.key as any)}
+                        style={{
+                            padding: '10px 0',
+                            border: 'none',
+                            background: 'none',
+                            borderBottom: activeTab === t.key ? '2px solid var(--primary-color)' : 'none',
+                            color: activeTab === t.key ? 'var(--primary-color)' : '#666',
+                            cursor: 'pointer',
+                            fontWeight: activeTab === t.key ? 600 : 400
+                        }}
+                    >
+                        {t.label}
+                    </button>
                 ))}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
                 {filteredThemes.map(t => (
-                    <div key={t.id} className="glass-card" style={{ padding: '1.25rem' }}>
+                    <div key={t.id} className="glass-card" style={{ padding: '1.25rem', position: 'relative' }}>
+                        {/* Badge de Status no canto */}
+                        {t.status === 'draft' && (
+                            <div style={{
+                                position: 'absolute', top: '8px', right: '8px', zIndex: 10,
+                                background: '#fbbf24', color: '#1f2937', padding: '4px 12px',
+                                borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700,
+                                display: 'flex', alignItems: 'center', gap: '4px',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                            }}>
+                                <FileEdit size={12} /> RASCUNHO
+                            </div>
+                        )}
                         <div style={{ height: '140px', background: '#f5f5f5', borderRadius: '8px', overflow: 'hidden', marginBottom: '1rem', border: '1px solid #eee' }}>
-                            {(t.backgroundEncartes || t.coverUrl) && <img src={t.coverUrl || t.backgroundEncartes} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                            {(t.backgroundEncartes || t.coverUrl) && <img src={t.coverUrl || t.backgroundEncartes} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={t.name} />}
                         </div>
-                        <h3 style={{ marginBottom: '1rem' }}>{t.name}</h3>
+                        <h3 style={{ marginBottom: '0.5rem' }}>{t.name}</h3>
+
+                        {/* Categorias */}
+                        {(t.categories?.length > 0) && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '0.5rem' }}>
+                                {t.categories.slice(0, 3).map(cat => (
+                                    <span key={cat} style={{ fontSize: '0.65rem', background: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '4px' }}>{cat}</span>
+                                ))}
+                                {t.categories.length > 3 && <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>+{t.categories.length - 3}</span>}
+                            </div>
+                        )}
+
+                        {/* Grid Formats Configuration Status */}
+                        {t.status === 'draft' && userData?.isSystemAdmin && (
+                            <div style={{
+                                display: 'flex',
+                                gap: '4px',
+                                marginBottom: '0.75rem',
+                                background: '#fef3c7',
+                                padding: '8px',
+                                borderRadius: '6px',
+                                border: '1px solid #fde68a'
+                            }}>
+                                <Layers size={14} color="#92400e" />
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: '0.7rem', color: '#92400e', fontWeight: 600 }}>
+                                        Formatos: {(t.configuredFormats?.length || 0)}/5 configurados
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '3px', marginTop: '4px' }}>
+                                        {GRID_FORMATS.map(format => {
+                                            const isConfigured = t.configuredFormats?.includes(format.key);
+                                            return (
+                                                <div
+                                                    key={format.key}
+                                                    style={{
+                                                        width: '28px',
+                                                        height: '18px',
+                                                        borderRadius: '4px',
+                                                        background: isConfigured ? '#10b981' : '#e5e7eb',
+                                                        color: isConfigured ? 'white' : '#9ca3af',
+                                                        fontSize: '0.55rem',
+                                                        fontWeight: 700,
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center'
+                                                    }}
+                                                    title={`${format.label} - ${isConfigured ? 'Configurado' : 'Pendente'}`}
+                                                >
+                                                    {format.key}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <div style={{
@@ -774,9 +991,32 @@ const ThemesModule = () => {
                                 </div>
                                 {t.isActive === false && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 600 }}>[OFF]</span>}
                                 {t.isPublic && <Globe size={14} color="var(--primary-color)" title="Global (Master)" />}
+                                {t.isPublic && t.isConfigured === false && t.status !== 'draft' && <span style={{ fontSize: '0.65rem', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>CONFIGURAR</span>}
                                 {t.status === 'pending' && <AlertCircle size={14} color="#f59e0b" title="Aguardando Aprovação" />}
                             </div>
                             <div style={{ display: 'flex', gap: '8px' }}>
+                                {/* Botão Publicar para temas Draft */}
+                                {userData?.isSystemAdmin && t.status === 'draft' && (
+                                    <button
+                                        className="btn-icon"
+                                        style={{
+                                            background: '#10b981',
+                                            color: 'white',
+                                            border: 'none',
+                                            padding: '6px 12px',
+                                            borderRadius: '6px',
+                                            fontWeight: 600,
+                                            fontSize: '0.75rem',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px'
+                                        }}
+                                        onClick={() => handlePublishDraft(t)}
+                                        title="Publicar Tema"
+                                    >
+                                        <Globe size={14} /> Publicar
+                                    </button>
+                                )}
                                 {userData?.isSystemAdmin && t.status === 'pending' && (
                                     <>
                                         <button className="btn-icon" style={{ color: 'green', border: '1px solid green' }} onClick={() => handleApproveTheme(t)} title="Aprovar Publicação Global"><Check size={16} /></button>
@@ -785,7 +1025,14 @@ const ThemesModule = () => {
                                 )}
                                 {(userData?.isSystemAdmin || (!t.isPublic && t.status !== 'pending') || (t.companyId === userData?.companyId)) && (
                                     <>
-                                        <button className="btn-icon" onClick={() => openSettings(t)} title="Configurar Layout"><Settings size={16} /></button>
+                                        <button
+                                            className="btn-icon"
+                                            onClick={() => openSettings(t)}
+                                            title="Configurar Layout/Baseline"
+                                            style={(t.isPublic && t.isConfigured === false) || t.status === 'draft' ? { background: 'var(--primary-color)', color: 'white' } : {}}
+                                        >
+                                            <Settings size={16} />
+                                        </button>
                                         <button className="btn-icon" onClick={() => openEdit(t)} title="Editar"><Edit size={16} /></button>
                                         <button className="btn-icon" style={{ color: 'red' }} onClick={() => handleDelete(t)} title="Excluir"><Trash2 size={16} /></button>
                                     </>

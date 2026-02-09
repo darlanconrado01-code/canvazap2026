@@ -7,14 +7,10 @@ export enum View {
   IMAGE_BANK = 'image_bank',
   REQUESTS = 'requests',
   SLIDES = 'slides',
-  TASKS = 'tasks'
+
 }
 
-export enum TaskStatus {
-  TODO = 'A Fazer',
-  DOING = 'Em Andamento',
-  DONE = 'Concluído'
-}
+
 
 export interface Company {
   id: string;
@@ -56,11 +52,27 @@ export interface Request {
   date: string;
 }
 
-export interface Task {
+
+
+export enum WebhookEvent {
+  ART_NEW = 'art.new',
+  ART_APPROVED = 'art.approved',
+  ART_NEW_VERSION = 'art.new_version',
+  ART_REVISION_REQUESTED = 'art.revision_requested',
+
+  TASK_ASSIGNED = 'task.assigned',
+
+  LAMINA_UPLOAD_REQUEST = 'lamina.upload_request',
+  FLYER_ART_GENERATED = 'flyer.art_generated',
+
+  WHATSAPP_BLAST = 'whatsapp.blast'
+}
+
+export interface WebhookConfig {
   id: string;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  assignee: string;
-  priority: 'low' | 'medium' | 'high';
+  url: string;
+  name: string;
+  events: WebhookEvent[];
+  active: boolean;
+  createdAt: string;
 }

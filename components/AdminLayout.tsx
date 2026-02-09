@@ -4,6 +4,35 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import AdminSidebar from './AdminSidebar';
 import TopBar from './TopBar';
+import BottomNav from './BottomNav';
+import { LayoutProvider, useLayout } from './LayoutContext';
+
+const AdminLayoutContent = () => {
+    const { isSidebarOpen, setSidebarOpen } = useLayout();
+
+    return (
+        <div className="app-container">
+            {/* Sidebar Overlay for Mobile */}
+            <div
+                className={`sidebar-overlay ${isSidebarOpen ? 'visible' : ''}`}
+                onClick={() => setSidebarOpen(false)}
+            />
+
+            <AdminSidebar />
+
+            <div className="main-wrapper">
+                <main className="main-content">
+                    <div className="content-container">
+                        <TopBar />
+                        <Outlet />
+                    </div>
+                </main>
+            </div>
+
+            <BottomNav />
+        </div>
+    );
+};
 
 const AdminLayout = () => {
     const { userData, loading } = useAuth();
@@ -20,18 +49,9 @@ const AdminLayout = () => {
     }
 
     return (
-        <div style={{ display: 'flex', minHeight: '100vh', width: '100%', backgroundColor: 'var(--bg-color)' }}>
-            <AdminSidebar />
-
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-                <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
-                    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                        <TopBar />
-                        <Outlet />
-                    </div>
-                </main>
-            </div>
-        </div>
+        <LayoutProvider>
+            <AdminLayoutContent />
+        </LayoutProvider>
     );
 };
 

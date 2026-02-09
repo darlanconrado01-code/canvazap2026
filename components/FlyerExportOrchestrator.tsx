@@ -11,6 +11,7 @@ export interface FlyerExportOrchestratorRef {
     exportAllPagesJpgZip: () => Promise<void>;
     exportCurrentPagePdf: (pageIndex: number) => Promise<void>;
     exportAllPagesPdf: () => Promise<void>;
+    generateImages: (pageIndex?: number) => Promise<Blob[]>;
 }
 
 interface FlyerExportOrchestratorProps {
@@ -20,6 +21,7 @@ interface FlyerExportOrchestratorProps {
     companyLogoUrl: string | null;
     onExportStart?: () => void;
     onExportEnd?: () => void;
+    onProgress?: (message: string) => void;
 }
 
 export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, FlyerExportOrchestratorProps>(({
@@ -28,7 +30,8 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
     layoutConfig,
     companyLogoUrl,
     onExportStart,
-    onExportEnd
+    onExportEnd,
+    onProgress
 }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -62,11 +65,20 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
 
         return new Promise((resolve) => {
             const img = new Image();
-            // Adicionamos parâmetros para garantir que o weserv não remova a transparência e converta para PNG se necessário
+
+            // Timeout de 10 segundos para não travar o export todo se um link morrer
+            const timeout = setTimeout(() => {
+                img.src = '';
+                console.warn("Intermediador timeout para:", url);
+                resolve(url);
+            }, 10000);
+
+            // Parâmetros para garantir que o weserv não remova a transparência
             const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&n=-1&output=png`;
 
             img.crossOrigin = "anonymous";
             img.onload = () => {
+                clearTimeout(timeout);
                 try {
                     const canvas = document.createElement('canvas');
 
@@ -100,7 +112,11 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                     resolve(proxyUrl);
                 }
             };
-            img.onerror = () => resolve(url);
+            img.onerror = () => {
+                clearTimeout(timeout);
+                console.error("Intermediador error para:", url);
+                resolve(url);
+            };
             img.src = proxyUrl;
         });
     };
@@ -108,31 +124,72 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
     const generateCanvas = async (element: HTMLElement): Promise<HTMLCanvasElement> => {
         await waitForImages(element);
 
+        // ESPERA POR FONTES - Crucial para evitar texto cortado por atraso de renderização
+        await document.fonts.ready;
+
+        // Assentar layout (2 frames)
+        await new Promise(r => requestAnimationFrame(r));
+        await new Promise(r => requestAnimationFrame(r));
+
         return await html2canvas(element, {
-            scale: 2,
+            scale: 1, // 1:1 com o render nativo de Camada 2
             useCORS: true,
             allowTaint: false,
-            backgroundColor: null, // Transparent background for the canvas itself
+            backgroundColor: null,
             logging: false,
-            width: 794,
-            height: 1123,
+            width: 1588,
+            height: 2246,
+            windowWidth: 1588,
+            windowHeight: 2246,
             scrollX: 0,
             scrollY: 0,
             onclone: (clonedDoc, el) => {
                 const clonedEl = el as HTMLElement;
+
+                clonedDoc.documentElement.style.width = '1588px';
+                clonedDoc.documentElement.style.height = '2246px';
+                clonedDoc.body.style.width = '1588px';
+                clonedDoc.body.style.height = '2246px';
+
                 clonedEl.style.opacity = '1';
                 clonedEl.style.visibility = 'visible';
                 clonedEl.style.transform = 'none';
                 clonedEl.style.left = '0';
                 clonedEl.style.top = '0';
-                clonedEl.style.display = 'flex'; // FlyerPage uses flex sometimes, and grid
+                clonedEl.style.width = '1588px';
+                clonedEl.style.height = '2246px';
 
-                // Hack: html2canvas as vezes falha com backdrop-filter, vamos tentar reforçar as cores
-                const cards = clonedEl.querySelectorAll('[style*="backdrop-filter"]');
-                cards.forEach((card: any) => {
-                    // Se estiver usando glassmorphism, aumentamos um pouco a opacidade para compensar a falta do blur no export
-                    if (card.style.backdropFilter !== 'none') {
-                        card.style.backgroundColor = card.style.backgroundColor.replace(/[\d.]+\)$/, '0.92)');
+                // Fonte / suavização
+                const body = clonedDoc.body;
+                body.style.fontSize = '16px';
+                (body.style as any).webkitFontSmoothing = 'antialiased';
+                (body.style as any).mozOsxFontSmoothing = 'grayscale';
+                // body.style.textRendering = 'geometricPrecision'; // Removido global conforme solicitado
+                (body.style as any).webkitTextSizeAdjust = '100%';
+
+                // Targeted Anti-clipping
+                const root = clonedEl; // Targeted specifically at the page we are capturing
+
+                // Hide all other pages in the clone to prevent layout interference
+                const allPages = clonedDoc.querySelectorAll('[data-export-page]');
+                allPages.forEach((p: any) => {
+                    const pageAttr = p.getAttribute('data-export-page');
+                    const currentAttr = clonedEl.getAttribute('data-export-page');
+                    if (pageAttr !== currentAttr) {
+                        p.style.setProperty('display', 'none', 'important');
+                    }
+                });
+
+                const textNodes = root.querySelectorAll('[data-export-text="true"]');
+                textNodes.forEach((node: any) => {
+                    node.style.setProperty('overflow', 'visible', 'important');
+                    node.style.setProperty('display', 'block', 'important');
+
+                    // Subimos até o topo para garantir que nada corte
+                    let p = node.parentElement;
+                    while (p && p !== clonedDoc.body) {
+                        p.style.setProperty('overflow', 'visible', 'important');
+                        p = p.parentElement;
                     }
                 });
             }
@@ -150,8 +207,10 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
     useImperativeHandle(ref, () => ({
         exportCurrentPageJpg: async (pageIndex) => {
             if (onExportStart) onExportStart();
+            if (onProgress) onProgress("Iniciamos o download do seu encarte...");
             try {
                 // ETAPA DE INTERMEDIAÇÃO (TRADUÇÃO)
+                if (onProgress) onProgress("Preparando imagens e fundos...");
                 const [logoB64, bgB64, sealB64] = await Promise.all([
                     intermediador(companyLogoUrl),
                     intermediador(theme?.backgroundEncartes),
@@ -167,6 +226,7 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 await Promise.all(productPromises);
 
                 setTranslatedData({ logo: logoB64, background: bgB64, seal: sealB64, productImages });
+                if (onProgress) onProgress("Não se preocupe! Estamos renderizando seu encarte...");
 
                 // Aumentamos para 2s para garantir render completa das Base64 e do Background
                 await new Promise(r => setTimeout(r, 2000));
@@ -174,6 +234,7 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 const el = getPageElement(pageIndex);
                 if (!el) throw new Error("Página não encontrada");
 
+                if (onProgress) onProgress("Finalizando arquivo JPG...");
                 const canvas = await generateCanvas(el);
                 canvas.toBlob(blob => {
                     if (blob) saveAs(blob, `encarte-pag-${pageIndex + 1}.jpg`);
@@ -189,9 +250,11 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
         },
         exportAllPagesJpgZip: async () => {
             if (onExportStart) onExportStart();
+            if (onProgress) onProgress("Iniciamos a geração do pacote de encartes...");
             try {
                 const zip = new JSZip();
 
+                if (onProgress) onProgress("Processando assets globais...");
                 const [logoB64, bgB64, sealB64] = await Promise.all([
                     intermediador(companyLogoUrl),
                     intermediador(theme?.backgroundEncartes),
@@ -209,6 +272,7 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 await Promise.all(allProductPromises);
 
                 for (let i = 0; i < pages.length; i++) {
+                    if (onProgress) onProgress(`Processando página ${i + 1} de ${pages.length}...`);
                     setTranslatedData({
                         logo: logoB64,
                         background: bgB64,
@@ -239,7 +303,9 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
         },
         exportCurrentPagePdf: async (pageIndex) => {
             if (onExportStart) onExportStart();
+            if (onProgress) onProgress("Iniciamos a geração do seu PDF...");
             try {
+                if (onProgress) onProgress("Preparando componentes visuais...");
                 const [logoB64, bgB64, sealB64] = await Promise.all([
                     intermediador(companyLogoUrl),
                     intermediador(theme?.backgroundEncartes),
@@ -255,11 +321,13 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 await Promise.all(productPromises);
 
                 setTranslatedData({ logo: logoB64, background: bgB64, seal: sealB64, productImages });
+                if (onProgress) onProgress("Aguarde um instante, estamos montando a página...");
                 await new Promise(r => setTimeout(r, 2000));
 
                 const el = getPageElement(pageIndex);
                 if (!el) throw new Error("Página não encontrada");
 
+                if (onProgress) onProgress("Gerando PDF de alta qualidade...");
                 const canvas = await generateCanvas(el);
                 const imgData = canvas.toDataURL('image/jpeg', 0.95);
                 const pdf = new jsPDF('p', 'mm', 'a4');
@@ -275,8 +343,10 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
         },
         exportAllPagesPdf: async () => {
             if (onExportStart) onExportStart();
+            if (onProgress) onProgress("Iniciamos a geração do PDF completo...");
             try {
                 const pdf = new jsPDF('p', 'mm', 'a4');
+                if (onProgress) onProgress("Preparando assets para múltiplas páginas...");
                 const [logoB64, bgB64, sealB64] = await Promise.all([
                     intermediador(companyLogoUrl),
                     intermediador(theme?.backgroundEncartes),
@@ -294,6 +364,7 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 await Promise.all(allProductPromises);
 
                 for (let i = 0; i < pages.length; i++) {
+                    if (onProgress) onProgress(`Renderizando página ${i + 1} de ${pages.length}...`);
                     setTranslatedData({
                         logo: logoB64,
                         background: bgB64,
@@ -319,6 +390,76 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
             } finally {
                 if (onExportEnd) onExportEnd();
             }
+        },
+        generateImages: async (pageIndex?: number): Promise<Blob[]> => {
+            if (onExportStart) onExportStart();
+            if (onProgress) onProgress("Iniciamos o processamento para WhatsApp...");
+            const blobs: Blob[] = [];
+            try {
+                // 1. Initial translations
+                if (onProgress) onProgress("Traduzindo elementos gráficos...");
+                const [logoB64, bgB64, sealB64] = await Promise.all([
+                    intermediador(companyLogoUrl),
+                    intermediador(theme?.backgroundEncartes),
+                    intermediador(theme?.priceSealUrl)
+                ]);
+
+                // 2. Batch product translations to avoid browser request limits
+                const allProductImages: Record<string, string> = {};
+                const flatProducts = pages.flat();
+                const CHUNK_SIZE = 5;
+
+                for (let i = 0; i < flatProducts.length; i += CHUNK_SIZE) {
+                    const chunk = flatProducts.slice(i, i + CHUNK_SIZE);
+                    const currentBatch = i / CHUNK_SIZE + 1;
+                    const totalBatches = Math.ceil(flatProducts.length / CHUNK_SIZE);
+
+                    if (onProgress) onProgress(`Processando imagens dos produtos (${currentBatch}/${totalBatches})...`);
+                    console.log(`[Export] Traduzindo lote de produtos ${currentBatch}...`);
+                    await Promise.all(chunk.map(async p => {
+                        const src = p.imageUrl || p.candidateUrls[0];
+                        if (src && !allProductImages[p.id]) {
+                            allProductImages[p.id] = await intermediador(src, true);
+                        }
+                    }));
+                }
+
+                // 3. Set data ONCE for all pages
+                setTranslatedData({
+                    logo: logoB64,
+                    background: bgB64,
+                    seal: sealB64,
+                    productImages: allProductImages
+                });
+
+                if (onProgress) onProgress("Não se preocupe! Estamos trabalhando em seu encarte...");
+
+                // Wait for the DOM to update and images to render
+                await new Promise(r => setTimeout(r, 2000));
+
+                // 4. Generate page(s)
+                const pagesToProcess = pageIndex !== undefined ? [pageIndex] : pages.map((_, idx) => idx);
+
+                for (const i of pagesToProcess) {
+                    if (onProgress) onProgress(`Finalizando lâmina ${i + 1} de ${pagesToProcess.length}...`);
+                    console.log(`[Export] Processando página ${i + 1}/${pages.length}...`);
+                    const el = getPageElement(i);
+                    if (el) {
+                        const canvas = await generateCanvas(el);
+                        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+                        if (blob) blobs.push(blob);
+                    }
+                }
+
+                setTranslatedData(null);
+                return blobs;
+            } catch (error) {
+                console.error("Error generating images:", error);
+                setTranslatedData(null);
+                throw error;
+            } finally {
+                if (onExportEnd) onExportEnd();
+            }
         }
     }));
 
@@ -330,13 +471,13 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 top: 0,
                 left: '-9999px',
                 zIndex: -9999,
-                width: '794px',
-                height: '1123px',
+                width: '4000px', // Container gigante (Camada 2)
+                height: '4000px',
                 background: 'white'
             }}
         >
             {pages.map((pageProducts, i) => (
-                <div key={i} data-export-page={i} style={{ width: '794px', height: '1123px', overflow: 'hidden' }}>
+                <div key={i} data-export-page={i} data-export-root="true" style={{ width: '1588px', height: '2246px', overflow: 'visible', background: 'white' }}>
                     <FlyerPage
                         products={pageProducts.map(p => translatedData?.productImages[p.id] ? { ...p, candidateUrls: [translatedData.productImages[p.id]] } : p)}
                         pageIndex={i}
@@ -347,7 +488,8 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                         } : null}
                         layoutConfig={layoutConfig}
                         companyLogoUrl={translatedData?.logo || companyLogoUrl}
-                        scale={1}
+                        scale={2} // CAMADA 2: ESCALA NATIVA 2X
+                        isExport={true}
                         style={{ width: '100%', height: '100%' }}
                         crossOrigin="anonymous"
                     />

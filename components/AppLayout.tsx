@@ -1,28 +1,47 @@
 
 import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import BottomNav from './BottomNav';
 import { useAuth } from './AuthContext';
+import { LayoutProvider, useLayout } from './LayoutContext';
 
-const AppLayout = () => {
-    const { userData, loading } = useAuth();
-
-    if (loading) return null;
+const AppLayoutContent = () => {
+    const { isSidebarOpen, setSidebarOpen } = useLayout();
 
     return (
-        <div style={{ display: 'flex', minHeight: '100vh', width: '100%', backgroundColor: 'var(--bg-color)' }}>
+        <div className="app-container">
+            {/* Sidebar Overlay for Mobile */}
+            <div
+                className={`sidebar-overlay ${isSidebarOpen ? 'visible' : ''}`}
+                onClick={() => setSidebarOpen(false)}
+            />
+
             <Sidebar />
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-                <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
-                    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+            <div className="main-wrapper">
+                <main className="main-content">
+                    <div className="content-container">
                         <TopBar />
                         <Outlet />
                     </div>
                 </main>
             </div>
+
+            <BottomNav />
         </div>
+    );
+};
+
+const AppLayout = () => {
+    const { loading } = useAuth();
+    if (loading) return null;
+
+    return (
+        <LayoutProvider>
+            <AppLayoutContent />
+        </LayoutProvider>
     );
 };
 

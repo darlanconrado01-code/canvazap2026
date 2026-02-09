@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, db } from '../services/firebaseConfig';
 import { doc, setDoc } from 'firebase/firestore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Mail, Lock, User as UserIcon, Loader2, ArrowRight, Phone, MapPin, Image as ImageIcon } from 'lucide-react';
 
 const Login = () => {
@@ -20,6 +20,8 @@ const Login = () => {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+    const location = useLocation();
+    const from = location.state?.from?.pathname || location.state?.from || '/';
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -68,7 +70,16 @@ const Login = () => {
                 // Small delay to ensure Firestore processes the write
                 await new Promise(resolve => setTimeout(resolve, 800));
             }
-            navigate('/');
+
+            // Check if there is a 'from' state or a search param in the 'from'
+            // For example if from is /join-company?code=123
+            // The location.state.from object usually has: pathname, search, hash.
+            const targetPath = location.state?.from
+                ? `${location.state.from.pathname}${location.state.from.search}`
+                : '/';
+
+            navigate(targetPath, { replace: true });
+
         } catch (err: any) {
             console.error('❌ Erro no registro:', err);
             if (err.code === 'auth/email-already-in-use') {
@@ -90,7 +101,7 @@ const Login = () => {
         <div className="auth-container">
             <div className="glass-card fade-in" style={{ maxWidth: isLogin ? '440px' : '500px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                    <h1 className="title">CanvaZap</h1>
+                    <h1 className="title">EcoD3</h1>
                     <p className="subtitle">
                         {isLogin ? 'Bem-vindo de volta! Acesse sua conta.' : 'Crie sua conta e comece agora.'}
                     </p>
@@ -129,7 +140,7 @@ const Login = () => {
                                 </div>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
                                 <div className="form-group">
                                     <label className="form-label">Telefone</label>
                                     <div style={{ position: 'relative' }}>

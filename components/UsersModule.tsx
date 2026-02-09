@@ -244,7 +244,7 @@ const UsersModule = () => {
 
             {/* Main Table */}
             <h3 className="title" style={{ marginBottom: '1rem', fontSize: '1.4rem' }}>Membros da Empresa</h3>
-            <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
+            <div className="glass-card table-responsive" style={{ padding: 0 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
                     <thead>
                         <tr style={{ background: 'var(--bg-color)', borderBottom: '1px solid var(--border-color)' }}>

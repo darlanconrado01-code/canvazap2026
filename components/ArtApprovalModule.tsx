@@ -138,7 +138,7 @@ const ArtApprovalModule = () => {
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
-            const files = Array.from(e.target.files);
+            const files = Array.from<File>(e.target.files);
             const enriched: { file: File, preview: string, width: number, height: number }[] = [];
             for (const file of files) {
                 const dims = await getDimensions(file);
@@ -612,7 +612,7 @@ const ArtApprovalModule = () => {
                                 </div>
                                 <div style={{ padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', opacity: col.isGray ? 0.6 : 1 }}>
                                     {filteredItems.filter(i => i.status === col.id).map(item => (
-                                        <ArtCard key={item.id} item={item} onClick={() => setSelectedItem(item)} isGray={col.isGray} />
+                                        <ArtCard key={item.id} item={item} onClick={() => setSelectedItem(item)} isGray={col.isGray} companyUsers={companyUsers} />
                                     ))}
                                     {filteredItems.filter(i => i.status === col.id).length === 0 && (
                                         <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.8rem', border: '2px dashed rgba(0,0,0,0.05)', borderRadius: '12px' }}>Vazio</div>
@@ -976,8 +976,24 @@ const ArtDetailModal = ({ item, onClose, onUpdateStatus, onAddFeedback, onDelete
     );
 };
 
-const ArtCard = ({ item, onClick, isGray }: { item: ArtApprovalItem, onClick: () => void, isGray?: boolean, [key: string]: any }) => {
+const ArtCard = ({ item, onClick, isGray, companyUsers = [] }: { item: ArtApprovalItem, onClick: () => void, isGray?: boolean, companyUsers?: any[] }) => {
     const postingDate = item.postingDate instanceof Timestamp ? item.postingDate.toDate() : new Date();
+
+    // Determine Assignee(s) based on status
+    let assignees: string[] = [];
+    let assigneeLabel = '';
+
+    if (item.status === 'PENDING_APPROVAL') {
+        assignees = item.approverIds || [];
+        assigneeLabel = 'Aprovadores';
+    } else if (item.status === 'REJECTED' || item.status === 'REJECTED_TOTAL') {
+        assignees = item.creatorId ? [item.creatorId] : [];
+        assigneeLabel = 'Corrigir';
+    } else {
+        assignees = item.creatorId ? [item.creatorId] : [];
+        assigneeLabel = 'Criador';
+    }
+
     return (
         <div className="glass-card" onClick={onClick} style={{ cursor: 'pointer', padding: 0, overflow: 'hidden', border: isGray ? '1px solid #e2e8f0' : '1px solid var(--border-color)', filter: isGray ? 'grayscale(1) opacity(0.5)' : 'none' }}>
             <div style={{ aspectRatio: '1/1', background: '#eee', position: 'relative' }}>
@@ -990,9 +1006,19 @@ const ArtCard = ({ item, onClick, isGray }: { item: ArtApprovalItem, onClick: ()
                 <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 700, color: isGray ? '#64748b' : 'inherit' }}>{item.title}</h4>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
                     <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{postingDate.toLocaleDateString('pt-BR')}</div>
-                    <button style={{ background: 'none', border: 'none', color: 'var(--primary-color)', fontSize: '0.65rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        VER HISTÓRICO <ChevronDown size={10} />
-                    </button>
+
+                    {/* Assignee Avatars */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title={`${assigneeLabel}: ${assignees.map(id => companyUsers.find(u => u.uid === id)?.displayName).join(', ')}`}>
+                        {assignees.slice(0, 3).map(id => {
+                            const user = companyUsers.find(u => u.uid === id);
+                            return (
+                                <div key={id} style={{ width: 22, height: 22, borderRadius: '50%', background: '#cbd5e1', overflow: 'hidden', border: '1px solid white' }}>
+                                    {user?.photoUrl ? <img src={user.photoUrl} style={{ width: '100%', height: '100%' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'white' }}>{user?.displayName?.charAt(0)}</div>}
+                                </div>
+                            );
+                        })}
+                        {assignees.length > 3 && <div style={{ fontSize: '0.6rem', color: '#94a3b8' }}>+{assignees.length - 3}</div>}
+                    </div>
                 </div>
             </div>
         </div>

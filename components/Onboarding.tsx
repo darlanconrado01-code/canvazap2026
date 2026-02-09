@@ -17,7 +17,7 @@ const Onboarding = () => {
         <div className="auth-container">
             <div className="glass-card fade-in" style={{ maxWidth: '1200px', width: '100%' }}>
                 <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-                    <h1 className="title">Bem-vindo ao CanvaZap</h1>
+                    <h1 className="title">Bem-vindo ao EcoD3</h1>
                     <p className="subtitle">Escolha como você deseja começar sua jornada.</p>
                 </div>
 
@@ -38,7 +38,7 @@ const Onboarding = () => {
 
                 <div style={{
                     display: 'grid',
-                    gridTemplateColumns: userData?.role === 'super_admin' ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
                     gap: '1.5rem',
                     marginBottom: '2rem'
                 }}>

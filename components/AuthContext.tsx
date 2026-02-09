@@ -29,10 +29,26 @@ interface UserData {
 
     // Computed properties based on current context (for backward compatibility)
     companyId?: string | null;
+    companyCode?: string | null; // NEW: Added for easier support contact
+    companyCategory?: string | null; // NEW: Core category for theme filtering
+    companySubcategory?: string | null; // NEW: Subcategory for more precise filtering
     role?: 'admin' | 'member' | 'super_admin' | null;
     status?: 'active' | 'pending' | null;
     allowedModules?: string[] | null;
     companyModules?: string[]; // Modules enabled for the company
+    companySubscription?: {
+        plan: 'monthly' | 'annual' | 'fixed_days' | 'vitalicio';
+        status: 'active' | 'overdue' | 'blocked';
+        expiryDate?: any;
+        lastPaymentDate?: any;
+    };
+    openaiApiKey?: string; // Added for AI features
+    imageBankSettings?: {
+        customUrl: string;
+        priority: 'company' | 'global';
+        searchByInternalCode: boolean;
+        searchByName: boolean;
+    };
     isOwner?: boolean;
 }
 
@@ -69,7 +85,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const authEmail = authUser?.email?.toLowerCase() || '';
 
         // --- 0. SUPER ADMIN FOOLPROOF CHECK ---
-        const isHardcodedAdmin = authEmail === 'darlanconrado01@gmail.com' || authEmail === 'darlanconrado@yahoo.com';
+        const lowerEmail = authEmail.toLowerCase();
+        const isHardcodedAdmin = lowerEmail === 'darlanconrado01@gmail.com' || lowerEmail === 'darlanconrado@yahoo.com';
         const superAdminModules = ['dashboard', 'usuarios', 'empresas', 'laminas', 'artes-vagas', 'banco-imagens', 'encartes'];
 
         console.log('🔍 [AuthContext] Iniciando (UID:', uid, 'Email:', authEmail, 'Admin:', isHardcodedAdmin, ')');
@@ -77,10 +94,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // BYPASS IMEDIATO PARA ADMIN: Não esperamos o Firestore se for do time CORE
         if (isHardcodedAdmin) {
             console.log('⚡ [AuthContext] MASTER BYPASS ATIVADO para:', authEmail);
+
+            let bypassName = authUser?.displayName || 'Master Admin';
+            if (lowerEmail === 'darlanconrado01@gmail.com') {
+                bypassName = 'Darlan Conrado';
+            }
+
             setUserData({
                 uid,
                 email: authEmail,
-                displayName: authUser?.displayName || 'Master Admin',
+                displayName: bypassName,
                 role: 'super_admin',
                 isSystemAdmin: true,
                 status: 'active',
@@ -193,6 +216,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             let activeMembership = memberships.find(m => m.companyId === activeCompanyId);
             let isOwner = activeMembership?.isOwner || false;
             let companyModules: string[] = [];
+            let companyCode: string = '';
+            let companyCategory: string = '';
+            let companySubcategory: string = '';
+            let companySubscription: any = null;
+            let imageBankSettings: any = null;
 
             if (activeCompanyId) {
                 try {
@@ -201,25 +229,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         const cData = companySnap.data();
                         isOwner = isOwner || cData.ownerId === uid || cData.ownerId === authEmail;
                         companyModules = cData.modules || [];
+                        companyCode = cData.code || '';
+                        companyCategory = cData.category || '';
+                        companyCategory = cData.category || '';
+                        companySubcategory = cData.subcategory || '';
+                        companySubscription = cData.subscription || null;
+                        imageBankSettings = cData.imageBankSettings || {
+                            customUrl: '',
+                            priority: 'global',
+                            searchByInternalCode: true,
+                            searchByName: true
+                        };
                         if (activeMembership && !activeMembership.companyName) activeMembership.companyName = cData.name;
                     }
                 } catch (e) { console.warn('⚠️ [AuthContext] Stage 3 (CompanyDetails) falhou ou timeout.'); }
             }
 
+            // Fetch API Key independently if needed, or stick to what was loaded
+            let openaiApiKey = '';
+            if (activeCompanyId) {
+                try {
+                    const cDoc = await getDoc(doc(db, 'companies', activeCompanyId));
+                    if (cDoc.exists()) {
+                        openaiApiKey = cDoc.data().openaiApiKey || '';
+                    }
+                } catch (e) { }
+            }
+
             // --- Stage 4: Set State ---
-            const finalUserData: UserData = {
+            let finalDisplayName = userDataFromDb.displayName || authUser?.displayName || 'Usuário';
+
+            // Proteção contra nomes incorretos ou placeholders para o administrador principal
+            if (lowerEmail === 'darlanconrado01@gmail.com') {
+                if (!userDataFromDb.displayName ||
+                    finalDisplayName === 'Master Admin' ||
+                    finalDisplayName === 'João' ||
+                    finalDisplayName === 'João Silva' ||
+                    finalDisplayName === 'Usuário') {
+                    finalDisplayName = 'Darlan Conrado';
+                }
+            }
+
+            const finalUserData = {
+                ...userDataFromDb,
                 uid: uid,
                 email: authEmail || userDataFromDb.email || null,
-                displayName: userDataFromDb.displayName || authUser?.displayName || 'Usuário',
+                displayName: finalDisplayName,
                 photoUrl: userDataFromDb.photoUrl || authUser?.photoURL || null,
                 memberships: memberships,
                 currentCompanyId: activeCompanyId,
                 isSystemAdmin: isHardcodedAdmin,
                 companyId: activeCompanyId,
+                companyCode: isHardcodedAdmin ? 'MASTER' : companyCode,
+                companyCategory: isHardcodedAdmin ? 'Super Admin' : companyCategory,
+                companySubcategory: isHardcodedAdmin ? 'Master' : companySubcategory,
                 role: (isHardcodedAdmin ? 'super_admin' : (activeMembership?.role || userDataFromDb.role || 'member')) as any,
                 status: (isHardcodedAdmin ? 'active' : (activeMembership?.status || userDataFromDb.status || 'active')) as any,
                 allowedModules: isHardcodedAdmin ? superAdminModules : (activeMembership?.allowedModules || userDataFromDb.allowedModules || []),
                 companyModules: isHardcodedAdmin ? superAdminModules : companyModules,
+                companySubscription: isHardcodedAdmin ? { plan: 'vitalicio', status: 'active' } : companySubscription,
+                imageBankSettings: imageBankSettings,
+                openaiApiKey: openaiApiKey,
                 isOwner: isHardcodedAdmin ? true : isOwner
             };
 
@@ -230,8 +300,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 finalUserData.status = 'active';
             }
 
-            // Reparar banco: se doc não existe ou mudou, atualiza
-            if (!userDocSnap?.exists() || memberships.length !== (userDataFromDb.memberships?.length || 0)) {
+            const nameNeedsCorrection = lowerEmail === 'darlanconrado01@gmail.com' && finalDisplayName === 'Darlan Conrado' && userDataFromDb.displayName !== 'Darlan Conrado';
+
+            // Reparar banco: se doc não existe, memberships mudaram, ou o nome precisou ser corrigido
+            if (!userDocSnap?.exists() || memberships.length !== (userDataFromDb.memberships?.length || 0) || nameNeedsCorrection) {
                 await setDoc(userDocRef, {
                     uid: uid,
                     email: finalUserData.email,
@@ -241,7 +313,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     isSystemAdmin: finalUserData.isSystemAdmin,
                     role: finalUserData.role,
                     updatedAt: new Date()
-                }, { merge: true }).catch(() => { });
+                }, { merge: true }).catch((e) => { console.error("Erro ao reparar doc do usuário:", e); });
             }
 
             console.log('🚀 [AuthContext] Resumo:', { email: finalUserData.email, companies: memberships.length });
@@ -281,16 +353,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 let isOwner = false;
                 let companyModules: string[] = [];
+                let companyCode: string = '';
+                let companyCategory: string = '';
+                let companySubcategory: string = '';
+                let imageBankSettings: any = null;
                 if (currentCompanyId) {
                     const companyDoc = await getDoc(doc(db, 'companies', currentCompanyId));
                     if (companyDoc.exists()) {
                         const companyData = companyDoc.data();
                         isOwner = companyData.ownerId === targetUid;
                         companyModules = companyData.modules || [];
+                        companyCode = companyData.code || '';
+                        companyCategory = companyData.category || '';
+                        companySubcategory = companyData.subcategory || '';
+                        imageBankSettings = companyData.imageBankSettings || {
+                            customUrl: '',
+                            priority: 'global',
+                            searchByInternalCode: true,
+                            searchByName: true
+                        };
                     }
                 }
 
                 const finalTargetData: UserData = {
+                    ...rawData,
                     uid: targetUid,
                     email: rawData.email,
                     displayName: rawData.displayName,
@@ -301,10 +387,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     currentCompanyId: currentCompanyId,
                     isSystemAdmin: !!rawData.isSystemAdmin,
                     companyId: currentCompanyId,
+                    companyCode: companyCode,
+                    companyCategory: companyCategory,
+                    companySubcategory: companySubcategory,
                     role: (activeMembership ? activeMembership.role : (rawData.role || 'member')) as any,
                     status: (activeMembership ? activeMembership.status : (rawData.status || 'active')) as any,
                     allowedModules: activeMembership ? activeMembership.allowedModules : (rawData.allowedModules || []),
                     companyModules: companyModules,
+                    imageBankSettings: imageBankSettings,
                     isOwner: isOwner
                 };
 

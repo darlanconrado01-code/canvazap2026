@@ -1,16 +1,16 @@
 
-import { Company, User, Theme, ProductImage, Request, Task, TaskStatus } from './types';
+import { Company, User, Theme, ProductImage, Request } from './types';
 
 export const MOCK_COMPANIES: Company[] = [
-  { id: '1', name: 'Supermercado Aurora', plan: 'Premium', status: 'active', modules: ['Lâminas', 'Encartes', 'Tarefas'] },
+  { id: '1', name: 'Supermercado Aurora', plan: 'Premium', status: 'active', modules: ['Lâminas', 'Encartes'] },
   { id: '2', name: 'Hipermercado Central', plan: 'Básico', status: 'active', modules: ['Lâminas'] },
-  { id: '3', name: 'Mini Mix Express', plan: 'Enterprise', status: 'inactive', modules: ['Lâminas', 'Tarefas', 'Financeiro'] }
+  { id: '3', name: 'Mini Mix Express', plan: 'Enterprise', status: 'inactive', modules: ['Lâminas', 'Financeiro'] }
 ];
 
 export const MOCK_USERS: User[] = [
-  { id: '1', name: 'Carlos Silva', email: 'carlos@d3.com', role: 'admin_master', companyId: 'all' },
-  { id: '2', name: 'Ana Souza', email: 'ana@aurora.com', role: 'admin_empresa', companyId: '1' },
-  { id: '3', name: 'Pedro Santos', email: 'pedro@central.com', role: 'colaborador', companyId: '2' }
+  { id: '1', name: 'Carlos Silva', email: 'carlos@d3.com', role: 'super_admin', companyId: 'all' },
+  { id: '2', name: 'Ana Souza', email: 'ana@aurora.com', role: 'admin', companyId: '1' },
+  { id: '3', name: 'Pedro Santos', email: 'pedro@central.com', role: 'member', companyId: '2' }
 ];
 
 export const MOCK_THEMES: Theme[] = [
@@ -30,8 +30,30 @@ export const MOCK_REQUESTS: Request[] = [
   { id: '2', productName: 'Detergente Ipê Maçã', status: 'resolved', requestedBy: 'Ana Souza', date: '2023-10-24' }
 ];
 
-export const MOCK_TASKS: Task[] = [
-  { id: '1', title: 'Cadastrar Imagem Skol', description: 'Buscar imagem oficial e remover fundo.', status: TaskStatus.TODO, assignee: 'Carlos Silva', priority: 'high' },
-  { id: '2', title: 'Revisar Tema Natal', description: 'Ajustar contraste das fontes no fundo vermelho.', status: TaskStatus.DOING, assignee: 'Juliana Designer', priority: 'medium' },
-  { id: '3', title: 'Atualização de Planos', description: 'Migrar Aurora para Enterprise.', status: TaskStatus.DONE, assignee: 'Carlos Silva', priority: 'low' }
-];
+
+
+export const DEFAULT_LAYOUT_CONFIG = {
+  columns: 3, rows: 2, gap: 15,
+  marginTop: 350, marginBottom: 20, marginLeft: 20, marginRight: 20,
+  colorDescription: '#000000', colorPrice: '#ff0000', colorCode: '#666666',
+  colorInternalCode: '#666666', colorEan: '#666666', colorPackaging: '#000000',
+  showPriceSeal: true, showInternalCode: true, showEan: true,
+  fontInternalCode: 1.2, fontEan: 1.2, fontSizeDescription: 0.9, fontSizePrice: 2.9,
+  cardBackgroundMode: 'white', cardOpacity: 0.7, cardRadius: 8, cardPadding: 10,
+  spacingBelowPhoto: 34, spacingBelowDescription: 0, spacingAbovePrice: 5,
+  priceCentsSpacing: 2, photoScale: 1.05, cardScale: 0.95, photoAreaHeight: 70,
+  elementsOrder: ['code', 'description', 'price'],
+  logoConfig: { x: 16, y: 150, scale: 1.4, visible: true },
+  sideTextConfig: {
+    text: 'Imagens meramente ilustrativas', fontSize: 12, color: '#9ca3af',
+    x: -11, y: 500, scale: 1, rotation: -90, visible: true
+  },
+  promoBadge: {
+    text: 'Terça da Carne', fontSize: 24, color: '#cc0000',
+    x: 50, y: 140, scale: 1.2, visible: false
+  },
+  promoMonth: {
+    text: 'Mês de Janeiro', fontSize: 18, color: '#333333',
+    x: 50, y: 110, visible: false
+  }
+};

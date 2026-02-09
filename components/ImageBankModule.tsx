@@ -4,13 +4,17 @@ import { useAuth } from './AuthContext';
 import { db, storage } from '../services/firebaseConfig';
 import { collection, query, where, getDocs, doc, setDoc, writeBatch, limit } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Search, Plus, Image as ImageIcon, Upload, Save, Loader2, Barcode, Trash2, Edit, AlertTriangle, Check } from 'lucide-react';
+import { Search, Plus, Image as ImageIcon, Upload, Save, Loader2, Barcode, Trash2, Edit, AlertTriangle, Check, Globe, Lock } from 'lucide-react';
+import { uploadToR2 } from '../services/r2Service';
+import { sendAdminNotification, AdminNotificationType } from '../services/NotificationService';
 
 interface Product {
     ean: string;
     name: string;
     imageUrl: string;
-    internalCode?: string; // Merged from mapping
+    internalCode?: string;
+    isGlobal?: boolean;
+    companyId?: string;
 }
 
 const ImageBankModule = () => {
@@ -47,69 +51,86 @@ const ImageBankModule = () => {
         if (userData?.companyId) {
             fetchProducts();
         }
-    }, [userData, userData?.companyId]); // Re-fetch if company context changes
+    }, [userData?.companyId, searchTerm]); // Re-fetch on company change OR search
 
     const fetchProducts = async () => {
+        if (!userData?.companyId) return;
         setLoading(true);
         try {
-            // 1. Fetch My Company Mappings (The "My List" source of truth)
-            const myMappingsMap: Record<string, any> = {};
+            // 1. Fetch ALL Company Mappings (source of truth for this view)
+            const mappingQ = query(
+                collection(db, 'product_mappings'),
+                where('companyId', '==', userData.companyId)
+            );
+            const mappingSnapshot = await getDocs(mappingQ);
+
             const myMappedProducts: Product[] = [];
+            const eansToFetch: string[] = [];
 
-            if (userData?.companyId) {
-                const mappingQ = query(collection(db, 'product_mappings'), where('companyId', '==', userData.companyId));
-                const mappingSnapshot = await getDocs(mappingQ);
-
-                mappingSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    myMappingsMap[data.ean] = { internalCode: data.internalCode, description: data.description };
-
-                    // Creates a "Stub" product from the mapping alone
-                    myMappedProducts.push({
-                        ean: data.ean,
-                        name: data.description || '', // Use mapped description if available
-                        imageUrl: `https://imagens.canvazap.com.br/codbarras/${data.ean}.png`,
-                        internalCode: data.internalCode
-                    });
-                });
-            }
-
-            // 2. Fetch Global Products (To get official names if needed)
-            let q = query(collection(db, 'products'), limit(50));
-            if (searchTerm && /^\d+$/.test(searchTerm)) {
-                q = query(collection(db, 'products'), where('ean', '==', searchTerm));
-            }
-
-            const productSnapshot = await getDocs(q);
-            const globalProducts = productSnapshot.docs.map(doc => doc.data() as Product);
-
-            // 3. Merge logic: Union of (Mapped Items) and (Fetched Global Items)
-            const combinedMap: Record<string, Product> = {};
-
-            // A. Add Global Products first
-            globalProducts.forEach(p => {
-                const mapping = myMappingsMap[p.ean];
-                combinedMap[p.ean] = {
-                    ...p,
-                    internalCode: mapping?.internalCode || '',
-                    // Prefer user Description over Global Name if they defined one in mapping
-                    name: mapping?.description || p.name
+            mappingSnapshot.forEach(doc => {
+                const data = doc.data();
+                const product: Product = {
+                    ean: data.ean,
+                    name: data.description || '',
+                    imageUrl: `https://imagens.canvazap.com.br/codbarras/${data.ean}.png`,
+                    internalCode: data.internalCode
                 };
-            });
 
-            // B. Add/Overlay Mapped Products
-            myMappedProducts.forEach(mp => {
-                if (combinedMap[mp.ean]) {
-                    // Update the global one with local mapping details
-                    combinedMap[mp.ean].internalCode = mp.internalCode;
-                    if (mp.name) combinedMap[mp.ean].name = mp.name;
-                } else {
-                    // Not found in global fetch -> Add the stub
-                    combinedMap[mp.ean] = mp;
+                // Local filter: search by EAN, Name or Internal Code
+                const lowerSearch = searchTerm.toLowerCase();
+                const matches = !searchTerm ||
+                    product.ean.includes(searchTerm) ||
+                    product.name.toLowerCase().includes(lowerSearch) ||
+                    (product.internalCode && product.internalCode.toLowerCase().includes(lowerSearch));
+
+                if (matches) {
+                    myMappedProducts.push(product);
+                    eansToFetch.push(product.ean);
                 }
             });
 
-            setProducts(Object.values(combinedMap));
+            // 2. Fetch both Global and Company-specific products
+            const globalDataMap: Record<string, Partial<Product>> = {};
+            const privateDataMap: Record<string, Partial<Product>> = {};
+
+            // Fetch in chunks
+            for (let i = 0; i < eansToFetch.length; i += 30) {
+                const chunk = eansToFetch.slice(i, i + 30);
+
+                // Fetch Global
+                const qGlobal = query(collection(db, 'products'), where('ean', 'in', chunk), where('isGlobal', '==', true));
+                const snapGlobal = await getDocs(qGlobal);
+                snapGlobal.forEach(doc => {
+                    globalDataMap[doc.data().ean] = doc.data();
+                });
+
+                // Fetch Private for this company
+                const qPrivate = query(collection(db, 'products'), where('ean', 'in', chunk), where('companyId', '==', userData.companyId));
+                const snapPrivate = await getDocs(qPrivate);
+                snapPrivate.forEach(doc => {
+                    const data = doc.data();
+                    privateDataMap[data.ean] = data;
+                });
+            }
+
+            // 3. Final Merge: Priority -> Private > Global > Static Fallback
+            const finalProducts = myMappedProducts.map(p => {
+                const priv = privateDataMap[p.ean];
+                const glob = globalDataMap[p.ean];
+
+                if (priv) {
+                    return { ...p, ...priv, isGlobal: false };
+                }
+                if (glob) {
+                    return { ...p, ...glob, isGlobal: true };
+                }
+                return p;
+            });
+
+            // Sort by name
+            finalProducts.sort((a, b) => a.name.localeCompare(b.name));
+
+            setProducts(finalProducts);
         } catch (error) {
             console.error("Error fetching image bank:", error);
         } finally {
@@ -123,33 +144,43 @@ const ImageBankModule = () => {
         setAddError('');
 
         try {
-            // 1. Check if EAN exists (to avoid duplicates description)
-            const eanRef = doc(db, 'products', newEan);
+            // 1. Prepare ID and metadata
+            const isPrivate = !!newImage; // If uploading, it starts as private
+            const productId = isPrivate ? `${userData.companyId}_${newEan}` : newEan;
 
             let imageUrl = '';
-            // If manual add, we might want to allow custom image OR use standard
-            // For now, let's stick to the previous logic of uploading if provided
-            // OR if strictly following the new rule, we could force the standard URL.
-            // But if user uploads, let's respect it for now or just save the URL.
-
             if (newImage) {
-                const storageRef = ref(storage, `products/${newEan}/${newImage.name}`);
-                await uploadBytes(storageRef, newImage);
-                imageUrl = await getDownloadURL(storageRef);
+                // Use R2 instead of Firebase Storage
+                imageUrl = await uploadToR2(newImage, `private_products/${userData.companyId}`);
             } else {
-                // Fallback to standard if no image provided?
-                // or error as before. Let's keep existing logic to not break manual flow.
                 imageUrl = `https://imagens.canvazap.com.br/codbarras/${newEan}.png`;
             }
 
-            // 2. Save Product
+            // 2. Save Product (Private or Default)
             const productData = {
                 ean: newEan,
                 name: newName,
                 imageUrl: imageUrl,
-                createdAt: new Date()
+                isGlobal: !isPrivate,
+                companyId: isPrivate ? userData.companyId : 'global',
+                status: isPrivate ? 'pending' : 'approved',
+                updatedAt: new Date(),
+                uploadedBy: userData.uid,
+                uploadedByName: userData.name || userData.displayName
             };
-            await setDoc(eanRef, productData, { merge: true });
+
+            await setDoc(doc(db, 'products', productId), productData, { merge: true });
+
+            // Notify Admins if it's a new upload or global request
+            if (isPrivate) {
+                sendAdminNotification(
+                    "Nova Imagem Cadastrada",
+                    `A empresa ${getCurrentCompanyName()} cadastrou uma nova imagem para o produto ${newName} (EAN: ${newEan}).`,
+                    AdminNotificationType.INFO,
+                    "/admin/banco-imagens",
+                    "BANCO DE IMAGENS"
+                );
+            }
 
             // 3. Save Mapping (if internal code provided)
             if (newInternalCode && userData?.companyId) {
@@ -299,6 +330,15 @@ const ImageBankModule = () => {
                             status: 'pending'
                         }, { merge: true });
                         opsInBatch++;
+
+                        // Notify Admins
+                        sendAdminNotification(
+                            "Solicitação de Imagem",
+                            `A empresa ${companyName} solicitou a imagem do EAN ${item.ean} (${item.description}).`,
+                            AdminNotificationType.INFO,
+                            "/admin/banco-imagens",
+                            "BANCO DE IMAGENS"
+                        );
                     }
                     successCount++;
                 }));
@@ -405,14 +445,26 @@ const ImageBankModule = () => {
 
                 {/* Right Panel: Mappings Table */}
                 <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                        <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '280px' }}>
                             <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Mapeamentos Atuais</h2>
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                                {products.length} itens encontrados
+                            <div style={{ position: 'relative', marginTop: '0.75rem', maxWidth: '400px' }}>
+                                <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                                <input
+                                    type="text"
+                                    className="form-input"
+                                    placeholder="Filtrar por nome, EAN ou código..."
+                                    style={{ paddingLeft: '2.5rem', fontSize: '0.85rem', height: '40px' }}
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                                {products.length} itens mapeados
+                                {searchTerm && ` encontrados para "${searchTerm}"`}
                             </p>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.2rem' }}>
                             {selectedProducts.length > 0 && (
                                 <button className="btn-secondary" style={{ color: 'var(--error-color)', borderColor: 'var(--error-color)' }} onClick={handleBulkDelete}>
                                     <Trash2 size={16} style={{ marginRight: '0.5rem' }} /> Excluir ({selectedProducts.length})
@@ -477,7 +529,14 @@ const ImageBankModule = () => {
                                             </div>
                                         </td>
                                         <td style={{ padding: '0.75rem' }}>
-                                            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{product.name || 'Sem descrição'}</div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{product.name || 'Sem descrição'}</div>
+                                                {product.isGlobal ? (
+                                                    <Globe size={12} color="var(--primary-color)" title="Imagem Global" />
+                                                ) : (
+                                                    <Lock size={12} color="#f59e0b" title="Imagem Privada (Sua Empresa)" />
+                                                )}
+                                            </div>
                                             <div style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{product.ean}</div>
                                         </td>
                                         <td style={{ padding: '0.75rem' }}>
@@ -553,108 +612,110 @@ const ImageBankModule = () => {
             </div>
 
             {/* Add Modal */}
-            {showModal && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    background: 'rgba(0,0,0,0.5)', zIndex: 1000,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    backdropFilter: 'blur(5px)'
-                }}>
-                    <div className="glass-card" style={{ width: '100%', maxWidth: '500px', margin: '2rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                            <h2 style={{ fontSize: '1.25rem' }}>Adicionar Novo Produto</h2>
-                            <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>✖</button>
-                        </div>
-
-                        {addError && (
-                            <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error-color)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <AlertTriangle size={16} /> {addError}
+            {
+                showModal && (
+                    <div style={{
+                        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        backdropFilter: 'blur(5px)'
+                    }}>
+                        <div className="glass-card" style={{ width: '100%', maxWidth: '500px', margin: '2rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                <h2 style={{ fontSize: '1.25rem' }}>Adicionar Novo Produto</h2>
+                                <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>✖</button>
                             </div>
-                        )}
 
-                        <form onSubmit={handleAddProduct}>
-                            <div className="form-group">
-                                <label className="form-label">Código EAN (Universal)</label>
-                                <div style={{ position: 'relative' }}>
-                                    <Barcode size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
+                            {addError && (
+                                <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error-color)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <AlertTriangle size={16} /> {addError}
+                                </div>
+                            )}
+
+                            <form onSubmit={handleAddProduct}>
+                                <div className="form-group">
+                                    <label className="form-label">Código EAN (Universal)</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <Barcode size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
+                                        <input
+                                            type="text"
+                                            className="form-input"
+                                            style={{ paddingLeft: '2.5rem' }}
+                                            placeholder="Ex: 7891234567890"
+                                            value={newEan}
+                                            onChange={(e) => setNewEan(e.target.value)}
+                                            required
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label">Nome do Produto</label>
                                     <input
                                         type="text"
                                         className="form-input"
-                                        style={{ paddingLeft: '2.5rem' }}
-                                        placeholder="Ex: 7891234567890"
-                                        value={newEan}
-                                        onChange={(e) => setNewEan(e.target.value)}
+                                        placeholder="Ex: Coca-Cola 350ml"
+                                        value={newName}
+                                        onChange={(e) => setNewName(e.target.value)}
                                         required
                                     />
                                 </div>
-                            </div>
 
-                            <div className="form-group">
-                                <label className="form-label">Nome do Produto</label>
-                                <input
-                                    type="text"
-                                    className="form-input"
-                                    placeholder="Ex: Coca-Cola 350ml"
-                                    value={newName}
-                                    onChange={(e) => setNewName(e.target.value)}
-                                    required
-                                />
-                            </div>
-
-                            <div className="form-group">
-                                <label className="form-label">Seu Código Interno (Opcional)</label>
-                                <input
-                                    type="text"
-                                    className="form-input"
-                                    placeholder="Ex: 101"
-                                    value={newInternalCode}
-                                    onChange={(e) => setNewInternalCode(e.target.value)}
-                                />
-                                <small style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Isso vinculará este produto ao seu sistema.</small>
-                            </div>
-
-                            <div className="form-group">
-                                <label className="form-label">Imagem do Produto</label>
-                                <div
-                                    style={{
-                                        border: '2px dashed var(--border-color)',
-                                        borderRadius: '8px',
-                                        padding: '2rem',
-                                        textAlign: 'center',
-                                        cursor: 'pointer',
-                                        backgroundColor: newImage ? 'rgba(5, 205, 153, 0.05)' : 'transparent'
-                                    }}
-                                    onClick={() => document.getElementById('file-upload')?.click()}
-                                >
-                                    {newImage ? (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--success-color)' }}>
-                                            <Check size={32} />
-                                            <span>{newImage.name}</span>
-                                        </div>
-                                    ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
-                                            <Upload size={32} />
-                                            <span>Clique para selecionar uma imagem</span>
-                                        </div>
-                                    )}
+                                <div className="form-group">
+                                    <label className="form-label">Seu Código Interno (Opcional)</label>
                                     <input
-                                        id="file-upload"
-                                        type="file"
-                                        accept="image/*"
-                                        style={{ display: 'none' }}
-                                        onChange={(e) => e.target.files && setNewImage(e.target.files[0])}
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="Ex: 101"
+                                        value={newInternalCode}
+                                        onChange={(e) => setNewInternalCode(e.target.value)}
                                     />
+                                    <small style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Isso vinculará este produto ao seu sistema.</small>
                                 </div>
-                            </div>
 
-                            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={uploading}>
-                                {uploading ? <Loader2 className="loading-spinner" /> : 'Salvar Produto'}
-                            </button>
-                        </form>
+                                <div className="form-group">
+                                    <label className="form-label">Imagem do Produto</label>
+                                    <div
+                                        style={{
+                                            border: '2px dashed var(--border-color)',
+                                            borderRadius: '8px',
+                                            padding: '2rem',
+                                            textAlign: 'center',
+                                            cursor: 'pointer',
+                                            backgroundColor: newImage ? 'rgba(5, 205, 153, 0.05)' : 'transparent'
+                                        }}
+                                        onClick={() => document.getElementById('file-upload')?.click()}
+                                    >
+                                        {newImage ? (
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--success-color)' }}>
+                                                <Check size={32} />
+                                                <span>{newImage.name}</span>
+                                            </div>
+                                        ) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
+                                                <Upload size={32} />
+                                                <span>Clique para selecionar uma imagem</span>
+                                            </div>
+                                        )}
+                                        <input
+                                            id="file-upload"
+                                            type="file"
+                                            accept="image/*"
+                                            style={{ display: 'none' }}
+                                            onChange={(e) => e.target.files && setNewImage(e.target.files[0])}
+                                        />
+                                    </div>
+                                </div>
+
+                                <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={uploading}>
+                                    {uploading ? <Loader2 className="loading-spinner" /> : 'Salvar Produto'}
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };
 
