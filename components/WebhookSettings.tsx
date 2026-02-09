@@ -22,7 +22,9 @@ import {
     AlertCircle,
     ExternalLink,
     ChevronDown,
-    ChevronUp
+    ChevronUp,
+    Edit,
+    X
 } from 'lucide-react';
 import { WebhookConfig, WebhookEvent } from '../types';
 
@@ -31,6 +33,7 @@ const WebhookSettings = () => {
     const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddForm, setShowAddForm] = useState(false);
+    const [editingWebhook, setEditingWebhook] = useState<WebhookConfig | null>(null);
     const [newWebhook, setNewWebhook] = useState({
         name: '',
         url: '',
@@ -80,6 +83,32 @@ const WebhookSettings = () => {
             console.error("Error creating webhook:", error);
             alert('Erro ao criar webhook.');
         }
+    };
+
+    const handleEdit = (webhook: WebhookConfig) => {
+        setEditingWebhook(webhook);
+        setShowAddForm(false);
+    };
+
+    const handleUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!userData?.companyId || !editingWebhook) return;
+
+        try {
+            await updateDoc(doc(db, 'companies', userData.companyId, 'webhooks', editingWebhook.id), {
+                name: editingWebhook.name,
+                url: editingWebhook.url,
+                events: editingWebhook.events
+            });
+            setEditingWebhook(null);
+        } catch (error) {
+            console.error("Error updating webhook:", error);
+            alert('Erro ao atualizar webhook.');
+        }
+    };
+
+    const handleCancelEdit = () => {
+        setEditingWebhook(null);
     };
 
     const handleToggleEvent = (hookId: string, eventId: WebhookEvent) => {
@@ -188,6 +217,77 @@ const WebhookSettings = () => {
                 </div>
             )}
 
+            {editingWebhook && (
+                <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '2rem', border: '2px solid #3b82f6' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#3b82f6' }}>
+                            <Edit size={20} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                            Editar Webhook
+                        </h4>
+                        <button onClick={handleCancelEdit} className="p-1 hover:bg-gray-100 rounded" title="Cancelar">
+                            <X size={20} />
+                        </button>
+                    </div>
+                    <form onSubmit={handleUpdate}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                            <div>
+                                <label className="form-label mb-1 block">Nome do Webhook</label>
+                                <input
+                                    type="text"
+                                    className="form-input w-full"
+                                    placeholder="Ex: Integração n8n ou Zapier"
+                                    value={editingWebhook.name}
+                                    onChange={e => setEditingWebhook({ ...editingWebhook, name: e.target.value })}
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="form-label mb-1 block">URL do Endpoint</label>
+                                <input
+                                    type="url"
+                                    className="form-input w-full"
+                                    placeholder="https://..."
+                                    value={editingWebhook.url}
+                                    onChange={e => setEditingWebhook({ ...editingWebhook, url: e.target.value })}
+                                    required
+                                />
+                            </div>
+                        </div>
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label className="form-label mb-2 block">Eventos para disparar</label>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                {availableEvents.map(event => (
+                                    <label key={event.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={editingWebhook.events.includes(event.id)}
+                                            onChange={() => {
+                                                const events = editingWebhook.events.includes(event.id)
+                                                    ? editingWebhook.events.filter(e => e !== event.id)
+                                                    : [...editingWebhook.events, event.id];
+                                                setEditingWebhook({ ...editingWebhook, events });
+                                            }}
+                                        />
+                                        <span style={{ fontSize: '0.85rem' }}>{event.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                            <button type="button" onClick={handleCancelEdit} className="btn btn-secondary">
+                                <X size={16} style={{ marginRight: '0.5rem' }} />
+                                Cancelar
+                            </button>
+                            <button type="submit" className="btn btn-primary">
+                                <Save size={16} style={{ marginRight: '0.5rem' }} />
+                                Salvar Alterações
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {webhooks.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px dashed var(--border-color)' }}>
@@ -219,6 +319,13 @@ const WebhookSettings = () => {
                                         title={hook.active ? "Desativar" : "Ativar"}
                                     >
                                         {hook.active ? <ToggleRight size={24} className="text-primary" /> : <ToggleLeft size={24} className="text-gray-400" />}
+                                    </button>
+                                    <button
+                                        onClick={() => handleEdit(hook)}
+                                        className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors"
+                                        title="Editar"
+                                    >
+                                        <Edit size={20} />
                                     </button>
                                     <button
                                         onClick={() => handleDelete(hook.id)}

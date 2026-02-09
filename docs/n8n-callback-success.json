@@ -1,0 +1,8 @@
+{
+    "campaignId": "{{$node["Webhook"].json.body.campaignId}}",
+    "recordId": "{{$item(0).$node["Loop Over Items"].json.recordId}}",
+    "status": "success",
+    "telefone_e164": "{{$item(0).$node["Loop Over Items"].json.telefone_e164}}",
+    "messageId": "{{$json.messages[0].id}}",
+    "sentAt": "{{$now.toISO()}}"
+}
