@@ -383,6 +383,7 @@ const PetVilleBlastsModule = () => {
             await batch.commit();
             console.log('✅ Campanha criada:', campaignId);
 
+
             // PASSO 2: Enviar para webhook com campaignId e recordIds
             setStatus("Enviando para o webhook…");
 
@@ -390,8 +391,7 @@ const PetVilleBlastsModule = () => {
                 ...payload,
                 campaignId, // ID da campanha para rastreamento
                 records: recordsWithIds, // Registros com IDs para atualização
-                companyId: userData?.companyId,
-                callbackUrl: `${window.location.origin}/api/petville-webhook-callback` // URL para receber retorno
+                companyId: userData?.companyId
             };
 
             console.log('📤 Enviando para webhook:', webhookUrl);
@@ -428,10 +428,57 @@ const PetVilleBlastsModule = () => {
 
             console.log('✅ Webhook processado com sucesso:', responseData);
 
-            setStatus("Disparo programado com sucesso!");
+            // PASSO 3: Processar resposta do N8N e atualizar registros individuais
+            if (responseData?.results && Array.isArray(responseData.results)) {
+                console.log(`📊 Processando ${responseData.results.length} resultados...`);
+
+                const updateBatch = writeBatch(db);
+                let successCount = 0;
+                let failedCount = 0;
+
+                for (const result of responseData.results) {
+                    const recordRef = doc(db, 'petville_blasts', result.recordId);
+
+                    if (result.status === 'success') {
+                        updateBatch.update(recordRef, {
+                            status: 'success',
+                            messageId: result.messageId,
+                            deliveredAt: result.sentAt || new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        });
+                        successCount++;
+                    } else if (result.status === 'failed') {
+                        updateBatch.update(recordRef, {
+                            status: 'failed',
+                            error: result.error,
+                            errorCode: result.errorCode,
+                            failedAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        });
+                        failedCount++;
+                    }
+                }
+
+                // Atualizar campanha com status final
+                const campaignRef = doc(db, 'petville_campaigns', campaignId);
+                updateBatch.update(campaignRef, {
+                    status: 'concluido',
+                    successCount,
+                    failedCount,
+                    completedAt: new Date().toISOString()
+                });
+
+                await updateBatch.commit();
+                console.log(`✅ Registros atualizados: ${successCount} sucessos, ${failedCount} falhas`);
+
+                setStatus(`Disparo concluído! ${successCount} enviados, ${failedCount} falhas.`);
+            } else {
+                setStatus("Disparo enviado ao N8N. Aguardando processamento...");
+            }
+
             setWebhookResponse({
                 success: true,
-                message: responseData?.message || "Webhook processado com sucesso. Aguardando retorno individual...",
+                message: responseData?.message || "Webhook processado com sucesso",
                 data: responseData
             });
 

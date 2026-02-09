@@ -1,0 +1,32 @@
+{
+    "success": true,
+    "message": "Disparos processados com sucesso",
+    "results": [
+        {
+            "recordId": "rec_001",
+            "status": "success",
+            "telefone_e164": "+5591981128051",
+            "messageId": "wamid.HBgNNTU5MTk4MTI4MDUxFQIAERgSQzg5RjE2QzQwRjBBNzY4NTYAA==",
+            "sentAt": "2026-02-09T16:30:00Z"
+        },
+        {
+            "recordId": "rec_002",
+            "status": "failed",
+            "telefone_e164": "+5591999999999",
+            "error": "Número não está no WhatsApp",
+            "errorCode": "INVALID_WHATSAPP_NUMBER"
+        },
+        {
+            "recordId": "rec_003",
+            "status": "success",
+            "telefone_e164": "+5591982117363",
+            "messageId": "wamid.HBgNNTU5MTk4MjExNzM2MxUCABEYEkM4OUYxNkM0MEYwQTc2ODU2QUE=",
+            "sentAt": "2026-02-09T16:30:05Z"
+        }
+    ],
+    "stats": {
+        "total": 3,
+        "success": 2,
+        "failed": 1
+    }
+}
