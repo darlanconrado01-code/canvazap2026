@@ -1,0 +1,362 @@
+{
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "2ad84985-7c33-48b3-8651-4ea46d49bce3",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                -800,
+                300
+            ],
+            "id": "40df0f71-d064-4b16-90ed-3a7ed2eda421",
+            "name": "Webhook",
+            "webhookId": "2ad84985-7c33-48b3-8651-4ea46d49bce3"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extrai o array de registros do payload\nlet payload = items?.[0]?.json;\n\nif (Array.isArray(payload)) {\n  payload = payload[0];\n}\n\nconst body = payload?.body ?? payload;\nlet records = [];\n\nif (Array.isArray(body)) {\n  records = body;\n} else if (body && Array.isArray(body.records)) {\n  records = body.records;\n} else if (Array.isArray(payload?.records)) {\n  records = payload.records;\n}\n\nif (!Array.isArray(records)) {\n  return [];\n}\n\n// Retorna cada registro como um item separado\nreturn records.map((entry) => ({ json: entry }));"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -600,
+                300
+            ],
+            "id": "f53c68c8-095d-4983-9509-b3d8de322b4a",
+            "name": "Extract Records"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict",
+                        "version": 3
+                    },
+                    "conditions": [
+                        {
+                            "id": "57a4824c-727a-4fba-95f3-4a6b06ed1c93",
+                            "leftValue": "={{ $json.tipo }}",
+                            "rightValue": "vaccine",
+                            "operator": {
+                                "type": "string",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.3,
+            "position": [
+                -400,
+                300
+            ],
+            "id": "2153304e-4bba-4af8-836b-fde56ab137a9",
+            "name": "Check Type"
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                -200,
+                200
+            ],
+            "id": "601e1389-7126-4598-8d4b-f8a4785623ae",
+            "name": "Loop Over Items"
+        },
+        {
+            "parameters": {
+                "resource": "messages-api",
+                "instanceName": "petville",
+                "remoteJid": "={{ $json.telefone_e164 }}",
+                "messageText": "=Comunicado importante! 🚨🚨 \n\n🐶🐱  Passamos para lembrar que {{ $json.animal }} precisa tomar vacina esta semana.   \n\n💉 Vacina: {{ $json.produto }}\n\nVamos agendar?",
+                "options_message": {}
+            },
+            "type": "n8n-nodes-evolution-api.evolutionApi",
+            "typeVersion": 1,
+            "position": [
+                0,
+                200
+            ],
+            "id": "aa4034f1-1bef-4ade-b129-3b29a443f548",
+            "name": "Send WhatsApp",
+            "alwaysOutputData": true,
+            "credentials": {
+                "evolutionApi": {
+                    "id": "TlXO67oVI8XQYyxL",
+                    "name": "PetVille"
+                }
+            },
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Formata resultado de SUCESSO\nconst record = $input.item(0).json;\nconst whatsappResponse = $input.item(0).json;\n\nreturn {\n  json: {\n    recordId: record.recordId,\n    status: \"success\",\n    telefone_e164: record.telefone_e164,\n    messageId: whatsappResponse.key?.id || \"msg_\" + Date.now(),\n    sentAt: new Date().toISOString()\n  }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                200,
+                100
+            ],
+            "id": "success-formatter",
+            "name": "Format Success"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Formata resultado de FALHA\nconst record = $input.item(0).json;\nconst errorData = $input.item(0).json.error || {};\n\nreturn {\n  json: {\n    recordId: record.recordId,\n    status: \"failed\",\n    telefone_e164: record.telefone_e164,\n    error: errorData.message || \"Erro ao enviar mensagem\",\n    errorCode: errorData.code || \"UNKNOWN_ERROR\"\n  }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                200,
+                300
+            ],
+            "id": "failed-formatter",
+            "name": "Format Failed"
+        },
+        {
+            "parameters": {},
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                400,
+                200
+            ],
+            "id": "40410489-d4f4-4c78-894d-4dcbd35418e7",
+            "name": "Wait",
+            "webhookId": "2d3f6f66-210d-460b-8c3a-2cea31c6ec06"
+        },
+        {
+            "parameters": {
+                "aggregate": "aggregateAllItemData",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.aggregate",
+            "typeVersion": 1,
+            "position": [
+                600,
+                200
+            ],
+            "id": "aggregate-results",
+            "name": "Aggregate Results"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Constrói resposta final com todos os resultados\nconst results = $input.all().map(item => item.json);\nconst successCount = results.filter(r => r.status === 'success').length;\nconst failedCount = results.filter(r => r.status === 'failed').length;\n\nreturn {\n  json: {\n    success: true,\n    message: \"Disparos processados com sucesso\",\n    results: results,\n    stats: {\n      total: results.length,\n      success: successCount,\n      failed: failedCount\n    }\n  }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                800,
+                200
+            ],
+            "id": "build-response",
+            "name": "Build Response"
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ $json }}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.5,
+            "position": [
+                1000,
+                200
+            ],
+            "id": "d8112a99-95c3-49b5-ad09-877dee19b3b0",
+            "name": "Respond to Webhook"
+        },
+        {
+            "parameters": {
+                "content": "## 📥 Recebe Webhook\nExtrai registros do payload",
+                "height": 240,
+                "width": 280
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                -840,
+                220
+            ],
+            "id": "note-1",
+            "name": "Note 1"
+        },
+        {
+            "parameters": {
+                "content": "## 🔄 Processa Cada Registro\nEnvia WhatsApp e captura resultado",
+                "height": 240,
+                "width": 480
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                -240,
+                60
+            ],
+            "id": "note-2",
+            "name": "Note 2"
+        },
+        {
+            "parameters": {
+                "content": "## 📊 Agrega e Responde\nJunta todos os resultados e retorna",
+                "height": 240,
+                "width": 680
+            },
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                560,
+                60
+            ],
+            "id": "note-3",
+            "name": "Note 3"
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Records",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Records": {
+            "main": [
+                [
+                    {
+                        "node": "Check Type",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Check Type": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Over Items",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Over Items": {
+            "main": [
+                [
+                    {
+                        "node": "Aggregate Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Send WhatsApp",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send WhatsApp": {
+            "main": [
+                [
+                    {
+                        "node": "Format Success",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Format Failed",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Format Success": {
+            "main": [
+                [
+                    {
+                        "node": "Wait",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Format Failed": {
+            "main": [
+                [
+                    {
+                        "node": "Wait",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Over Items",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Aggregate Results": {
+            "main": [
+                [
+                    {
+                        "node": "Build Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Response": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "9afdb11c3639e4ac01660c283f45afb5bc718554bf9997d00bb258cc5f095480"
+    },
+    "tags": []
+}

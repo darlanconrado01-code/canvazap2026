@@ -431,10 +431,18 @@ const ThemesModule = () => {
                 coverUrl: theme.coverUrl || '',
                 isActive: theme.isActive ?? true,
                 availability: theme.availability || [],
-                companyId: userData.companyId, isPublic: false,
-                status: 'active', createdAt: new Date(), updatedAt: new Date(),
+                companyId: userData.companyId,
+                isPublic: false,
+                status: 'active' as const,
+                createdAt: new Date(),
+                updatedAt: new Date(),
                 defaultLayoutConfig: theme.defaultLayoutConfig || {},
-                isConfigured: true
+                // NOVO: Copiar gridConfigs e configuredFormats
+                gridConfigs: theme.gridConfigs || {},
+                configuredFormats: theme.configuredFormats || [],
+                isConfigured: theme.isConfigured ?? true,
+                defaultPromoMonth: theme.defaultPromoMonth || '',
+                defaultPromoBadge: theme.defaultPromoBadge || ''
             };
             await addDoc(collection(db, 'themes'), newThemeData);
             alert('Tema duplicado com sucesso!');
@@ -1037,6 +1045,11 @@ const ThemesModule = () => {
                                         <button className="btn-icon" style={{ color: 'red' }} onClick={() => handleDelete(t)} title="Excluir"><Trash2 size={16} /></button>
                                     </>
                                 )}
+                                {/* Botão de Duplicar para temas próprios da empresa */}
+                                {t.companyId === userData?.companyId && (
+                                    <button className="btn-icon" onClick={() => handleDuplicate(t)} title="Duplicar Tema"><Copy size={16} /></button>
+                                )}
+                                {/* Botão de Duplicar para temas públicos (usuários não-admin) */}
                                 {(!userData?.isSystemAdmin && t.isPublic) && (
                                     <button className="btn-icon" onClick={() => handleDuplicate(t)} title="Duplicar para Minha Empresa"><Copy size={16} /></button>
                                 )}
