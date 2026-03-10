@@ -38,19 +38,48 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
     // Helper robusto para esperar imagens
     const waitForImages = async (element: HTMLElement) => {
         const images = Array.from(element.querySelectorAll('img'));
-        const promises = images.map(img => {
-            if (img.complete && img.naturalWidth !== 0) return Promise.resolve();
+        const elementsWithBg = Array.from(element.querySelectorAll('*')).filter(el => {
+            const bg = window.getComputedStyle(el).backgroundImage;
+            return bg && bg !== 'none' && bg.includes('url(');
+        });
+
+        const imagePromises = images.map(img => {
+            if (img.complete && img.naturalWidth > 0) return Promise.resolve();
             return new Promise(resolve => {
-                img.onload = resolve;
-                img.onerror = resolve;
-                // Timeout individual para cada imagem
-                setTimeout(resolve, 5000);
+                let finished = false;
+                const done = () => {
+                    if (finished) return;
+                    finished = true;
+                    resolve(null);
+                };
+                img.addEventListener('load', done, { once: true });
+                img.addEventListener('error', done, { once: true });
+                // Check again in case it finished between query and event listener
+                if (img.complete && img.naturalWidth > 0) done();
+                setTimeout(done, 10000); // Wait up to 10s
             });
         });
 
-        // Espera todas as imagens + um buffer de segurança
-        await Promise.all(promises);
-        await new Promise(r => setTimeout(r, 1000));
+        const bgPromises = elementsWithBg.map(el => {
+            const bg = window.getComputedStyle(el).backgroundImage;
+            const urlMatch = bg.match(/url\(["']?([^"']+)["']?\)/);
+            if (!urlMatch) return Promise.resolve();
+            const url = urlMatch[1];
+
+            return new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => resolve(null);
+                img.onerror = () => resolve(null);
+                img.src = url;
+                setTimeout(() => resolve(null), 10000);
+            });
+        });
+
+        await Promise.all([...imagePromises, ...bgPromises]);
+
+        // Pequena espera adicional para garantir que o motor de renderização do browser
+        // assentou os pixels após o carregamento (crucial para html2canvas)
+        await new Promise(r => setTimeout(r, 1500));
     };
 
     const getPageElement = (index: number): HTMLElement | null => {
@@ -58,66 +87,111 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
         return containerRef.current.querySelector(`[data-export-page="${index}"]`) as HTMLElement;
     };
 
-    // --- O INTERMEDIADOR (TRADUTOR DE IMAGENS) ---
+    // Cache de traduções para evitar re-processar a mesma imagem no mesmo ciclo
+    const translationCache = useRef<Record<string, string>>({});
+
+    const cleanupCache = () => {
+        translationCache.current = {};
+    };
+
+    useEffect(() => {
+        return () => cleanupCache();
+    }, []);
+
+    // --- O INTERMEDIADOR (DOWNLOADER LOCAL) ---
+    // Agora ele baixa a imagem, processa no canvas se necessário e retorna uma URL de DATA (Base64).
+    // Base64 é visualmente idêntico a Blobs mas "instantâneo" para o html2canvas ler.
     const intermediador = async (url: string | null | undefined, forceSquare: boolean = false): Promise<string> => {
         if (!url || url.length < 5) return '';
-        if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+        if (url.startsWith('data:')) return url;
+
+        const cacheKey = `${url}_${forceSquare}`;
+        if (translationCache.current[cacheKey]) return translationCache.current[cacheKey];
 
         return new Promise((resolve) => {
-            const img = new Image();
-
-            // Timeout de 10 segundos para não travar o export todo se um link morrer
             const timeout = setTimeout(() => {
-                img.src = '';
                 console.warn("Intermediador timeout para:", url);
-                resolve(url);
-            }, 10000);
+                resolve(url || '');
+            }, 25000); // 25s timeout
 
-            // Parâmetros para garantir que o weserv não remova a transparência
-            const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&n=-1&output=png`;
-
-            img.crossOrigin = "anonymous";
-            img.onload = () => {
-                clearTimeout(timeout);
+            const processImage = async (img: HTMLImageElement) => {
                 try {
                     const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) throw new Error("Could not get canvas context");
 
                     if (forceSquare) {
-                        // TÉCNICA SUPREMA: Criamos uma imagem quadrada TRANSPARENTE e colocamos o produto no meio.
                         const size = Math.max(img.width, img.height);
                         canvas.width = size;
                         canvas.height = size;
-                        const ctx = canvas.getContext('2d');
-                        if (ctx) {
-                            // Fundo transparente (padrão do canvas, mas garantindo que não estamos limpando com branco)
-                            const x = (size - img.width) / 2;
-                            const y = (size - img.height) / 2;
-                            ctx.drawImage(img, x, y);
-                            resolve(canvas.toDataURL('image/png'));
-                        } else {
-                            resolve(proxyUrl);
-                        }
+                        const x = (size - img.width) / 2;
+                        const y = (size - img.height) / 2;
+                        ctx.drawImage(img, x, y);
                     } else {
                         canvas.width = img.width;
                         canvas.height = img.height;
-                        const ctx = canvas.getContext('2d');
-                        if (ctx) {
-                            ctx.drawImage(img, 0, 0);
-                            resolve(canvas.toDataURL('image/png'));
-                        } else {
-                            resolve(proxyUrl);
-                        }
+                        ctx.drawImage(img, 0, 0);
                     }
+
+                    const dataUrl = canvas.toDataURL('image/png');
+                    translationCache.current[cacheKey] = dataUrl;
+                    clearTimeout(timeout);
+                    resolve(dataUrl);
                 } catch (e) {
-                    resolve(proxyUrl);
+                    clearTimeout(timeout);
+                    resolve(url);
                 }
             };
-            img.onerror = () => {
-                clearTimeout(timeout);
-                console.error("Intermediador error para:", url);
-                resolve(url);
+
+            const downloadAndProcess = async () => {
+                try {
+                    // Tenta baixar via fetch direto
+                    let response = await fetch(url, { mode: 'cors' }).catch(() => null);
+
+                    // Fallback 1: Weserv
+                    if (!response || !response.ok) {
+                        const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(url)}&n=-1&output=png`;
+                        response = await fetch(proxyUrl).catch(() => null);
+                    }
+
+                    // Fallback 2: wsrv.nl direto
+                    if (!response || !response.ok) {
+                        const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(url)}&n=-1&output=png`;
+                        response = await fetch(proxyUrl).catch(() => null);
+                    }
+
+                    if (response && response.ok) {
+                        const blob = await response.blob();
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const b64 = reader.result as string;
+                            const img = new Image();
+                            img.onload = () => processImage(img);
+                            img.onerror = () => {
+                                clearTimeout(timeout);
+                                resolve(url);
+                            };
+                            img.src = b64;
+                        };
+                        reader.readAsDataURL(blob);
+                    } else {
+                        // Fallback 3: Image Tag (pode falhar no canvas por CORS, mas é a última tentativa)
+                        const img = new Image();
+                        img.crossOrigin = "anonymous";
+                        img.onload = () => processImage(img);
+                        img.onerror = () => {
+                            clearTimeout(timeout);
+                            resolve(url);
+                        };
+                        img.src = url;
+                    }
+                } catch (err) {
+                    clearTimeout(timeout);
+                    resolve(url);
+                }
             };
-            img.src = proxyUrl;
+
+            downloadAndProcess();
         });
     };
 
@@ -127,9 +201,10 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
         // ESPERA POR FONTES - Crucial para evitar texto cortado por atraso de renderização
         await document.fonts.ready;
 
-        // Assentar layout (2 frames)
+        // Assentar layout (vários frames para garantir estabilidade)
         await new Promise(r => requestAnimationFrame(r));
         await new Promise(r => requestAnimationFrame(r));
+        await new Promise(r => setTimeout(r, 500));
 
         return await html2canvas(element, {
             scale: 1, // 1:1 com o render nativo de Camada 2
@@ -239,11 +314,13 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 canvas.toBlob(blob => {
                     if (blob) saveAs(blob, `encarte-pag-${pageIndex + 1}.jpg`);
                     setTranslatedData(null);
+                    cleanupCache(); // Limpar após download
                 }, 'image/jpeg', 0.95);
             } catch (error) {
                 console.error(error);
                 alert('Erro ao exportar JPG.');
                 setTranslatedData(null);
+                cleanupCache();
             } finally {
                 if (onExportEnd) onExportEnd();
             }
@@ -280,8 +357,8 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                         productImages: allProductImages
                     });
 
-                    // Esperar renderização de cada página
-                    await new Promise(r => setTimeout(r, 1500));
+                    // Esperar renderização de cada página de forma agressiva
+                    await new Promise(r => setTimeout(r, 2000));
 
                     const el = getPageElement(i);
                     if (el) {
@@ -293,10 +370,12 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 const content = await zip.generateAsync({ type: 'blob' });
                 saveAs(content, 'encarte-completo.zip');
                 setTranslatedData(null);
+                cleanupCache();
             } catch (error) {
                 console.error(error);
                 alert('Erro ao exportar ZIP.');
                 setTranslatedData(null);
+                cleanupCache();
             } finally {
                 if (onExportEnd) onExportEnd();
             }
@@ -334,9 +413,11 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
                 pdf.save(`encarte-pag-${pageIndex + 1}.pdf`);
                 setTranslatedData(null);
+                cleanupCache();
             } catch (error) {
                 console.error(error);
                 setTranslatedData(null);
+                cleanupCache();
             } finally {
                 if (onExportEnd) onExportEnd();
             }
@@ -372,7 +453,7 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                         productImages: allProductImages
                     });
 
-                    await new Promise(r => setTimeout(r, 1500));
+                    await new Promise(r => setTimeout(r, 2000));
 
                     const el = getPageElement(i);
                     if (el) {
@@ -384,9 +465,11 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 }
                 pdf.save('encarte-completo.pdf');
                 setTranslatedData(null);
+                cleanupCache();
             } catch (error) {
                 console.error(error);
                 setTranslatedData(null);
+                cleanupCache();
             } finally {
                 if (onExportEnd) onExportEnd();
             }
@@ -452,10 +535,12 @@ export const FlyerExportOrchestrator = forwardRef<FlyerExportOrchestratorRef, Fl
                 }
 
                 setTranslatedData(null);
+                cleanupCache();
                 return blobs;
             } catch (error) {
                 console.error("Error generating images:", error);
                 setTranslatedData(null);
+                cleanupCache();
                 throw error;
             } finally {
                 if (onExportEnd) onExportEnd();

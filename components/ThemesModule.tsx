@@ -32,6 +32,7 @@ interface Theme {
     };
     defaultPromoMonth?: string;
     defaultPromoBadge?: string;
+    month?: number;
     isConfigured?: boolean; // True if ALL grid formats are configured
     configuredFormats?: GridFormatKey[]; // List of configured formats
     inheritedFromCompany?: string; // Nova: se herda categoria da empresa
@@ -49,6 +50,7 @@ const ThemesModule = () => {
 
     const [editingTheme, setEditingTheme] = useState<Theme | null>(null);
     const [dbCategories, setDbCategories] = useState<any[]>([]);
+    const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
 
     useEffect(() => {
         const fetchBaseData = async () => {
@@ -197,7 +199,8 @@ const ThemesModule = () => {
         name: '', categories: [] as string[], subcategories: [] as string[],
         backgroundEncartes: '', coverUrl: '', isActive: true, availability: [] as string[],
         isPublic: false, allowedCompanies: [] as string[],
-        defaultPromoMonth: '', defaultPromoBadge: '', inheritedFromCompany: ''
+        defaultPromoMonth: '', defaultPromoBadge: '', inheritedFromCompany: '',
+        month: 0
     });
 
     const resetForm = () => {
@@ -205,7 +208,8 @@ const ThemesModule = () => {
             name: '', categories: [], subcategories: [],
             backgroundEncartes: '', coverUrl: '', isActive: true, availability: [],
             isPublic: false, allowedCompanies: [],
-            defaultPromoMonth: '', defaultPromoBadge: '', inheritedFromCompany: ''
+            defaultPromoMonth: '', inheritedFromCompany: '',
+            month: 0
         });
         setEditingTheme(null);
     };
@@ -258,8 +262,11 @@ const ThemesModule = () => {
                 isPublic: finalIsPublic,
                 status: finalStatus,
                 allowedCompanies: formData.allowedCompanies,
-                defaultPromoMonth: formData.defaultPromoMonth,
-                defaultPromoBadge: formData.defaultPromoBadge,
+                defaultPromoMonth: formData.month > 0 ? `Mês de ${[
+                    '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+                ][formData.month]}` : '',
+                month: formData.month,
                 isConfigured: editingTheme ? (editingTheme.isConfigured ?? true) : !formData.isPublic,
                 inheritedFromCompany: formData.inheritedFromCompany || null,
                 updatedAt: new Date()
@@ -387,7 +394,7 @@ const ThemesModule = () => {
             isPublic: theme.isPublic,
             allowedCompanies: theme.allowedCompanies || [],
             defaultPromoMonth: theme.defaultPromoMonth || '',
-            defaultPromoBadge: theme.defaultPromoBadge || '',
+            month: theme.month || 0,
             inheritedFromCompany: theme.inheritedFromCompany || ''
         });
         setView('form');
@@ -442,7 +449,7 @@ const ThemesModule = () => {
                 configuredFormats: theme.configuredFormats || [],
                 isConfigured: theme.isConfigured ?? true,
                 defaultPromoMonth: theme.defaultPromoMonth || '',
-                defaultPromoBadge: theme.defaultPromoBadge || ''
+                month: theme.month || 0
             };
             await addDoc(collection(db, 'themes'), newThemeData);
             alert('Tema duplicado com sucesso!');
@@ -453,11 +460,27 @@ const ThemesModule = () => {
         }
     };
 
-    const filteredThemes = themes.filter(t =>
-        t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.categories || []).some(cat => cat.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (t.subcategories || []).some(sub => sub.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const currentMonthForSort = new Date().getMonth() + 1;
+
+    const filteredThemes = themes
+        .filter(t => {
+            const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (t.categories || []).some(cat => cat.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (t.subcategories || []).some(sub => sub.toLowerCase().includes(searchTerm.toLowerCase()));
+
+            const matchesMonth = selectedMonth === 0 || t.month === selectedMonth;
+
+            return matchesSearch && matchesMonth;
+        })
+        .sort((a, b) => {
+            const monthA = a.month || 0;
+            const monthB = b.month || 0;
+
+            if (monthA === currentMonthForSort && monthB !== currentMonthForSort) return -1;
+            if (monthB === currentMonthForSort && monthA !== currentMonthForSort) return 1;
+
+            return a.name.localeCompare(b.name);
+        });
 
 
     if (view === 'form') {
@@ -574,14 +597,34 @@ const ThemesModule = () => {
                                 </div>
                             )}
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem' }}>
                             <div>
-                                <label className="form-label">Mês Padrão (Opcional)</label>
-                                <input className="form-input" placeholder="Ex: Mês de Janeiro" value={formData.defaultPromoMonth} onChange={e => setFormData({ ...formData, defaultPromoMonth: e.target.value })} />
+                                <label className="form-label">Mês Sugerido (Ordenação)</label>
+                                <select
+                                    className="form-input"
+                                    value={formData.month}
+                                    onChange={e => setFormData({ ...formData, month: parseInt(e.target.value) })}
+                                >
+                                    <option value={0}>Nenhum / Geral</option>
+                                    <option value={1}>Janeiro</option>
+                                    <option value={2}>Fevereiro</option>
+                                    <option value={3}>Março</option>
+                                    <option value={4}>Abril</option>
+                                    <option value={5}>Maio</option>
+                                    <option value={6}>Junho</option>
+                                    <option value={7}>Julho</option>
+                                    <option value={8}>Agosto</option>
+                                    <option value={9}>Setembro</option>
+                                    <option value={10}>Outubro</option>
+                                    <option value={11}>Novembro</option>
+                                    <option value={12}>Dezembro</option>
+                                </select>
                             </div>
-                            <div>
-                                <label className="form-label">Dia/Selo Padrão (Opcional)</label>
-                                <input className="form-input" placeholder="Ex: Terça da Carne" value={formData.defaultPromoBadge} onChange={e => setFormData({ ...formData, defaultPromoBadge: e.target.value })} />
+                            <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '8px' }}>
+                                <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>
+                                    <Check size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#22c55e' }} />
+                                    O texto do mês será definido automaticamente como <strong>Mês de {['-', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][formData.month]}</strong>
+                                </p>
                             </div>
                         </div>
 
@@ -861,8 +904,31 @@ const ThemesModule = () => {
                 </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                <h1 className="title" style={{ margin: 0 }}>Gerenciamento de Temas</h1>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+                    <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
+                        <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                        <input
+                            type="text"
+                            placeholder="Buscar temas..."
+                            className="form-input"
+                            style={{ paddingLeft: '2.5rem' }}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <select
+                        className="form-input"
+                        style={{ width: '180px' }}
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                    >
+                        <option value={0}>Todos os Meses</option>
+                        {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, i) => (
+                            <option key={i} value={i + 1}>{m}</option>
+                        ))}
+                    </select>
+                </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                     {userData?.isSystemAdmin && (
                         <button

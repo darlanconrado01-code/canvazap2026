@@ -1,5 +1,7 @@
 import React, { forwardRef } from 'react';
 import { ProductItem } from './FlyerTypes';
+import { SmartImage } from './SmartImage';
+import { ImageIcon } from 'lucide-react';
 
 interface LayoutConfig {
     [key: string]: any;
@@ -31,46 +33,52 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
     },
     ref
 ) => {
-    // Dimensões baseadas no formato - COPIADO DO FLYERPAGE
-    const getDimensions = () => {
+    // Configuração de Alta Resolução (Match com o Orchestrator)
+    const INT_SCALE = 2;
+
+    const getBaseDimensions = () => {
         switch (selectedFormat) {
-            case 'stories':
-                return { width: 1080, height: 1980 };
-            case 'feed':
-                return { width: 1080, height: 1350 };
-            case 'tv':
-                return { width: 1920, height: 1080 };
+            case 'stories': return { width: 1080, height: 1920 };
+            case 'feed': return { width: 1080, height: 1350 };
+            case 'tv': return { width: 1920, height: 1080 };
             case 'post':
-            default:
-                return { width: 1080, height: 1080 };
+            default: return { width: 1080, height: 1080 };
         }
     };
 
-    const dimensions = getDimensions();
-    const PAGE_W = dimensions.width;
-    const PAGE_H = dimensions.height;
+    const base = getBaseDimensions();
+    // Dimensões internas reais (2x)
+    const PAGE_W = base.width * INT_SCALE;
+    const PAGE_H = base.height * INT_SCALE;
 
-    // COPIADO DO FLYERPAGE - Escala de display
-    const displayScale = isExport ? 1 : scale;
-    const contentScale = 1; // Para lâminas, não precisamos de INT_SCALE como nos encartes
+    // Se estiver exportando, usamos escala 1 (tamanho real interno). 
+    // Se for preview, multiplicamos a escala desejada pelo inverso da escala interna
+    const displayScale = isExport ? 1 : scale / INT_SCALE;
 
-    // COPIADO DO FLYERPAGE - Helper para escalar valores
-    const s = (val: number | undefined) => Math.round((val || 0) * contentScale);
-    const spx = (val: number | undefined) => `${Math.round((val || 0) * contentScale)}px`;
+    // Helpers dinâmicos baseados na escala interna
+    const spx = (val: number | undefined) => `${(val || 0) * INT_SCALE}px`;
+    const srem = (val: number | undefined) => `${(val || 0) * 16 * INT_SCALE}px`;
 
     // Helper para formatar preço
     const formatPrice = (price: string) => {
+        if (!price) return null;
         const match = price.match(/R?\$?\s*(\d+)[,.](\d{2})/);
         if (!match) return null;
         return { int: match[1], cents: match[2] };
     };
 
+    // Unificando URLs para o SmartImage
+    const productUrls = [
+        ...(product.imageUrl ? [product.imageUrl] : []),
+        ...(product.candidateUrls || [])
+    ].filter(u => !!u);
+
     return (
         <div
             className="lamina-page-preview-container"
             style={{
-                width: isExport ? `${PAGE_W}px` : `${PAGE_W * displayScale}px`,
-                height: isExport ? `${PAGE_H}px` : `${PAGE_H * displayScale}px`,
+                width: `${PAGE_W * displayScale}px`,
+                height: `${PAGE_H * displayScale}px`,
                 position: 'relative',
                 flexShrink: 0,
                 ...style
@@ -89,9 +97,10 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                     transform: isExport ? 'none' : `translateX(-50%) scale(${displayScale})`,
                     transformOrigin: 'top center',
                     overflow: 'hidden',
+                    boxShadow: isExport ? 'none' : '0 10px 30px rgba(0,0,0,0.1)'
                 }}
             >
-                {/* Gradiente TV (se aplicável) - ANTES da imagem do produto */}
+                {/* Gradiente TV */}
                 {selectedFormat === 'tv' && layoutConfig.tvGradientVisible && (
                     <div style={{
                         position: 'absolute',
@@ -106,105 +115,145 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                     }} />
                 )}
 
-                {/* Imagem do Produto como Fundo - COPIADO DA LÓGICA DO PREVIEW */}
-                {product.isLinked && product.imageUrl && (
-                    <img
-                        src={product.imageUrl}
-                        style={{
-                            width: `${(layoutConfig.productScale || 1) * 100}%`,
-                            height: `${(layoutConfig.productScale || 1) * 100}%`,
-                            objectFit: 'cover',
-                            transform: `translate(-50%, calc(-50% + ${layoutConfig.yOffset || 0}px))`,
-                            position: 'absolute',
-                            left: selectedFormat === 'tv' && layoutConfig.tvGradientVisible
-                                ? `${(layoutConfig.tvGradientDirection === 'right' ? 30 : 70) + ((layoutConfig.productX || 50) - 50)}%`
-                                : `${layoutConfig.productX || 50}%`,
-                            top: `${layoutConfig.productY || 50}%`,
-                            zIndex: 0
-                        }}
-                        crossOrigin={crossOrigin}
-                        alt="Produto"
-                    />
-                )}
+                {/* Imagem do Produto (SmartImage) */}
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: selectedFormat === 'tv' && layoutConfig.tvGradientVisible
+                            ? `${(layoutConfig.tvGradientDirection === 'right' ? 30 : 70) + ((layoutConfig.productX || 50) - 50)}%`
+                            : `${layoutConfig.productX || 50}%`,
+                        top: `${layoutConfig.productY || 50}%`,
+                        width: `${(layoutConfig.productScale || 1) * 100}%`,
+                        height: `${(layoutConfig.productScale || 1) * 100}%`,
+                        transform: `translate(-50%, calc(-50% + ${spx(layoutConfig.yOffset)}))`,
+                        zIndex: 0
+                    }}
+                >
+                    {productUrls.length > 0 ? (
+                        <SmartImage
+                            urls={productUrls}
+                            style={{ width: '100%', height: '100%' }}
+                            crossOrigin={crossOrigin}
+                            fallback={
+                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+                                    <ImageIcon size={120 * INT_SCALE} color="#cbd5e1" />
+                                </div>
+                            }
+                        />
+                    ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+                            <ImageIcon size={120 * INT_SCALE} color="#cbd5e1" />
+                        </div>
+                    )}
+                </div>
 
-                {/* Company Logo - COPIADO DO FLYERPAGE */}
+                {/* Company Logo */}
                 {companyLogoUrl && layoutConfig.logoVisible && (
                     <div
                         style={{
                             position: 'absolute',
                             left: `${layoutConfig.logoX ?? 50}%`,
                             top: `${layoutConfig.logoY ?? 14}%`,
-                            transform: `translate(-50%, -50%) scale(${(layoutConfig.logoScale || 0.24) * 8})`,
+                            // Usamos um container fixo para garantir centralização perfeita no motor de captura
+                            width: spx(600),
+                            height: spx(600),
+                            marginLeft: spx(-300),
+                            marginTop: spx(-300),
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             zIndex: (layoutConfig.layersOrder?.indexOf('logo') ?? 3) + 10,
-                            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))'
                         }}
                     >
                         <img
                             src={companyLogoUrl}
-                            style={{ maxWidth: '100px', maxHeight: '100px', objectFit: 'contain', display: 'block' }}
+                            style={{
+                                // Calculamos o tamanho final diretamente em vez de usar scale()
+                                width: spx(120 * (layoutConfig.logoScale || 0.24) * 8),
+                                height: spx(120 * (layoutConfig.logoScale || 0.24) * 8),
+                                objectFit: 'contain',
+                                display: 'block',
+                                filter: `drop-shadow(0 ${spx(2)} ${spx(4)} rgba(0,0,0,0.2))`
+                            }}
                             alt="Logo"
                             crossOrigin={companyLogoUrl.startsWith('data:') ? undefined : crossOrigin}
                         />
                     </div>
                 )}
 
-                {/* Selo de Preço - COPIADO DO PREVIEW */}
+                {/* Selo de Preço */}
                 {layoutConfig.sealVisible && layoutConfig.sealUrl && (
                     <div style={{
                         position: 'absolute',
                         left: `${layoutConfig.sealX}%`,
                         top: `${layoutConfig.sealY}%`,
-                        transform: `translate(-50%, -50%) scale(${layoutConfig.sealScale * 5})`,
+                        width: spx(800),
+                        height: spx(800),
+                        marginLeft: spx(-400),
+                        marginTop: spx(-400),
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         zIndex: (layoutConfig.layersOrder?.indexOf('seal') ?? 2) + 10
                     }}>
-                        <img
-                            src={layoutConfig.sealUrl}
-                            style={{ width: '100px', height: '100px', objectFit: 'contain' }}
-                            alt="Selo"
-                            crossOrigin={layoutConfig.sealUrl.startsWith('data:') ? undefined : crossOrigin}
-                        />
+                        <div style={{ position: 'relative', width: 'fit-content', height: 'fit-content' }}>
+                            <img
+                                src={layoutConfig.sealUrl}
+                                style={{
+                                    width: spx(150 * (layoutConfig.sealScale * 5)),
+                                    height: spx(150 * (layoutConfig.sealScale * 5)),
+                                    objectFit: 'contain'
+                                }}
+                                alt="Selo"
+                                crossOrigin={layoutConfig.sealUrl.startsWith('data:') ? undefined : crossOrigin}
+                            />
 
-                        {/* Preço sobre o Selo */}
-                        {layoutConfig.priceVisible && product.price && (
-                            <div style={{
-                                position: 'absolute',
-                                left: `${50 + (layoutConfig.priceXOffset || 0)}%`,
-                                top: `${50 + (layoutConfig.priceYOffset || 0)}%`,
-                                transform: `translate(-50%, -50%) scale(${layoutConfig.priceScale})`,
-                                color: layoutConfig.colorPrice,
-                                fontWeight: 950,
-                                fontSize: '1.4rem'
-                            }}>
-                                {(() => {
-                                    const parts = formatPrice(product.price);
-                                    if (!parts) return null;
-                                    return (
-                                        <div style={{ display: 'flex', flexDirection: layoutConfig.currencySymbolPosition === 'top' ? 'column' : 'row', alignItems: layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start'), lineHeight: 1 }}>
-                                            {layoutConfig.currencySymbolVisible && (
-                                                <span style={{
-                                                    fontSize: `${layoutConfig.currencySymbolScale || 0.7}em`,
-                                                    marginRight: layoutConfig.currencySymbolPosition === 'top' ? '0' : '2px',
-                                                    marginBottom: layoutConfig.currencySymbolPosition === 'top' ? '-5px' : '0',
-                                                    alignSelf: layoutConfig.currencySymbolPosition === 'before' ? 'center' : (layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start')),
-                                                    marginTop: layoutConfig.currencySymbolPosition === 'superscript' ? '4px' : '0',
-                                                    transform: `translate(${layoutConfig.priceCurrencyXOffset || 0}px, ${layoutConfig.priceCurrencyYOffset || 0}px)`,
-                                                    display: 'inline-block'
-                                                }}>R$</span>
-                                            )}
-                                            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                <span style={{ transform: `translate(${layoutConfig.priceRealXOffset || 0}px, ${layoutConfig.priceRealYOffset || 0}px)`, display: 'inline-block' }}>{parts.int}</span>
-                                                <span style={{
-                                                    fontSize: `${layoutConfig.priceCentsScale || 0.6}em`,
-                                                    marginTop: '2px',
-                                                    transform: `translate(${layoutConfig.priceCentsXOffset || 0}px, ${layoutConfig.priceCentsYOffset || 0}px)`,
-                                                    display: 'inline-block'
-                                                }}>,{parts.cents}</span>
+                            {/* Preço sobre o Selo */}
+                            {layoutConfig.priceVisible && product.price && (
+                                <div style={{
+                                    position: 'absolute',
+                                    left: `${50 + (layoutConfig.priceXOffset || 0)}%`,
+                                    top: `${50 + (layoutConfig.priceYOffset || 0)}%`,
+                                    transform: 'translate(-50%, -50%)',
+                                    color: layoutConfig.colorPrice,
+                                    fontWeight: 950,
+                                    // Combinamos o scale original no fontSize para remover o transform: scale
+                                    fontSize: srem(8 * (layoutConfig.priceScale || 1)),
+                                    textShadow: `0 ${spx(4)} ${spx(10)} rgba(0,0,0,0.3)`,
+                                    textAlign: 'center',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    {(() => {
+                                        const parts = formatPrice(product.price);
+                                        if (!parts) return null;
+                                        return (
+                                            <div style={{ display: 'flex', flexDirection: layoutConfig.currencySymbolPosition === 'top' ? 'column' : 'row', alignItems: layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start'), lineHeight: 0.8 }}>
+                                                {layoutConfig.currencySymbolVisible && (
+                                                    <span style={{
+                                                        fontSize: `${layoutConfig.currencySymbolScale || 0.7}em`,
+                                                        marginRight: layoutConfig.currencySymbolPosition === 'top' ? '0' : spx(5),
+                                                        marginBottom: layoutConfig.currencySymbolPosition === 'top' ? spx(-10) : '0',
+                                                        alignSelf: layoutConfig.currencySymbolPosition === 'before' ? 'center' : (layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start')),
+                                                        marginTop: layoutConfig.currencySymbolPosition === 'superscript' ? spx(4) : '0',
+                                                        transform: `translate(${spx(layoutConfig.priceCurrencyXOffset)}, ${spx(layoutConfig.priceCurrencyYOffset)})`,
+                                                        display: 'inline-block'
+                                                    }}>R$</span>
+                                                )}
+                                                <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                                    <span style={{ transform: `translate(${spx(layoutConfig.priceRealXOffset)}, ${spx(layoutConfig.priceRealYOffset)})`, display: 'inline-block' }}>{parts.int}</span>
+                                                    <span style={{
+                                                        fontSize: `${layoutConfig.priceCentsScale || 0.6}em`,
+                                                        marginTop: spx(10),
+                                                        transform: `translate(${spx(layoutConfig.priceCentsXOffset)}, ${spx(layoutConfig.priceCentsYOffset)})`,
+                                                        display: 'inline-block'
+                                                    }}>,{parts.cents}</span>
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
-                        )}
+                                        );
+                                    })()}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -216,34 +265,37 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                             position: 'absolute',
                             left: `${layoutConfig.priceX + (layoutConfig.priceXOffset || 0)}%`,
                             top: `${layoutConfig.priceY + (layoutConfig.priceYOffset || 0)}%`,
-                            transform: `translate(-50%, -50%) scale(${layoutConfig.priceScale * 1.5})`,
+                            transform: 'translate(-50%, -50%)',
                             color: layoutConfig.colorPrice,
                             fontWeight: 950,
-                            fontSize: '1.4rem'
+                            // Combinamos a escala no tamanho da fonte
+                            fontSize: srem(8 * (layoutConfig.priceScale * 2)),
+                            textShadow: `0 ${spx(4)} ${spx(10)} rgba(0,0,0,0.3)`,
+                            whiteSpace: 'nowrap'
                         }}
                     >
                         {(() => {
                             const parts = formatPrice(product.price);
                             if (!parts) return null;
                             return (
-                                <div style={{ display: 'flex', flexDirection: layoutConfig.currencySymbolPosition === 'top' ? 'column' : 'row', alignItems: layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start'), lineHeight: 1 }}>
+                                <div style={{ display: 'flex', flexDirection: layoutConfig.currencySymbolPosition === 'top' ? 'column' : 'row', alignItems: layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start'), lineHeight: 0.8 }}>
                                     {layoutConfig.currencySymbolVisible && (
                                         <span style={{
                                             fontSize: `${layoutConfig.currencySymbolScale || 0.7}em`,
-                                            marginRight: layoutConfig.currencySymbolPosition === 'top' ? '0' : '2px',
-                                            marginBottom: layoutConfig.currencySymbolPosition === 'top' ? '-10px' : '0',
+                                            marginRight: layoutConfig.currencySymbolPosition === 'top' ? '0' : spx(5),
+                                            marginBottom: layoutConfig.currencySymbolPosition === 'top' ? spx(-10) : '0',
                                             alignSelf: layoutConfig.currencySymbolPosition === 'before' ? 'center' : (layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start')),
-                                            marginTop: layoutConfig.currencySymbolPosition === 'superscript' ? '4px' : '0',
-                                            transform: `translate(${layoutConfig.priceCurrencyXOffset || 0}px, ${layoutConfig.priceCurrencyYOffset || 0}px)`,
+                                            marginTop: layoutConfig.currencySymbolPosition === 'superscript' ? spx(4) : '0',
+                                            transform: `translate(${spx(layoutConfig.priceCurrencyXOffset)}, ${spx(layoutConfig.priceCurrencyYOffset)})`,
                                             display: 'inline-block'
                                         }}>R$</span>
                                     )}
                                     <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                        <span style={{ transform: `translate(${layoutConfig.priceRealXOffset || 0}px, ${layoutConfig.priceRealYOffset || 0}px)`, display: 'inline-block' }}>{parts.int}</span>
+                                        <span style={{ transform: `translate(${spx(layoutConfig.priceRealXOffset)}, ${spx(layoutConfig.priceRealYOffset)})`, display: 'inline-block' }}>{parts.int}</span>
                                         <span style={{
                                             fontSize: `${layoutConfig.priceCentsScale || 0.6}em`,
-                                            marginTop: '2px',
-                                            transform: `translate(${layoutConfig.priceCentsXOffset || 0}px, ${layoutConfig.priceCentsYOffset || 0}px)`,
+                                            marginTop: spx(10),
+                                            transform: `translate(${spx(layoutConfig.priceCentsXOffset)}, ${spx(layoutConfig.priceCentsYOffset)})`,
                                             display: 'inline-block'
                                         }}>,{parts.cents}</span>
                                     </div>
@@ -253,40 +305,42 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                     </div>
                 )}
 
-                {/* Descrição - COPIADO DO PREVIEW */}
+                {/* Descrição */}
                 {layoutConfig.descVisible && (
                     <div
                         data-export-text="true"
                         style={{
                             position: 'absolute',
-                            left: `${layoutConfig.descX}%`,
+                            left: 0,
+                            width: '100%',
                             bottom: `${layoutConfig.descY}%`,
-                            transform: 'translateX(-50%)',
                             color: layoutConfig.colorDescription,
                             fontSize: (() => {
-                                const baseSize = layoutConfig.fontSizeDescription / 2;
+                                const baseSize = 4 * (layoutConfig.fontSizeDescription || 1);
                                 const text = product.normalizedDescription || product.description || '';
-                                if (text.length > 60) return `${baseSize * 0.7}rem`;
-                                if (text.length > 40) return `${baseSize * 0.8}rem`;
-                                if (text.length > 25) return `${baseSize * 0.9}rem`;
-                                return `${baseSize}rem`;
+                                let size = baseSize;
+                                if (text.length > 60) size *= 0.7;
+                                else if (text.length > 40) size *= 0.82;
+                                else if (text.length > 25) size *= 0.92;
+                                return srem(size);
                             })(),
                             fontWeight: 800,
                             textAlign: 'center',
-                            width: '90%',
                             zIndex: (layoutConfig.layersOrder?.indexOf('description') ?? 1) + 10,
                             height: 'auto',
-                            minHeight: `${(layoutConfig.fontSizeDescription / 2) * 1.5}rem`,
+                            minHeight: srem(2),
                             lineHeight: '1.1',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            padding: '0.1rem 0'
+                            padding: `${spx(1.6)} 0`,
+                            textShadow: layoutConfig.colorDescription === '#ffffff' ? `0 ${spx(2)} ${spx(4)} rgba(0,0,0,0.5)` : 'none'
                         }}
                     >
                         <span style={{
                             display: 'block',
-                            width: '100%',
+                            width: '90%',
+                            margin: '0 auto',
                             overflow: 'visible',
                             wordBreak: 'break-word'
                         }}>
@@ -295,7 +349,7 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                     </div>
                 )}
 
-                {/* Código Interno - COPIADO DO PREVIEW */}
+                {/* Código Interno */}
                 {layoutConfig.showInternalCode && product.internalCode && (
                     <div
                         data-export-text="true"
@@ -305,18 +359,19 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                             bottom: `${layoutConfig.codeInternalY}%`,
                             transform: 'translateX(-50%)',
                             color: layoutConfig.colorInternalCode,
-                            fontSize: `${layoutConfig.fontSizeInternalCode / 2}rem`,
+                            fontSize: srem(layoutConfig.fontSizeInternalCode),
                             fontWeight: 700,
                             zIndex: (layoutConfig.layersOrder?.indexOf('codes') ?? 0) + 10,
-                            textShadow: layoutConfig.codeShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
-                            WebkitTextStroke: layoutConfig.codeStroke ? `1px ${layoutConfig.colorInternalCode === '#ffffff' ? 'black' : 'white'}` : 'none'
+                            textShadow: layoutConfig.codeShadow ? `0 0 ${spx(4)} rgba(0,0,0,0.8)` : 'none',
+                            whiteSpace: 'nowrap',
+                            width: 'auto'
                         }}
                     >
                         {product.internalCode}
                     </div>
                 )}
 
-                {/* Código EAN - COPIADO DO PREVIEW */}
+                {/* Código EAN */}
                 {layoutConfig.showEan && product.ean && (
                     <div
                         data-export-text="true"
@@ -326,18 +381,19 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                             bottom: `${layoutConfig.codeEanY}%`,
                             transform: 'translateX(-50%)',
                             color: layoutConfig.colorEan,
-                            fontSize: `${layoutConfig.fontSizeEan / 2}rem`,
+                            fontSize: srem(layoutConfig.fontSizeEan),
                             fontWeight: 700,
                             zIndex: (layoutConfig.layersOrder?.indexOf('codes') ?? 0) + 10,
-                            textShadow: layoutConfig.codeShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
-                            WebkitTextStroke: layoutConfig.codeStroke ? `1px ${layoutConfig.colorEan === '#ffffff' ? 'black' : 'white'}` : 'none'
+                            textShadow: layoutConfig.codeShadow ? `0 0 ${spx(4)} rgba(0,0,0,0.8)` : 'none',
+                            whiteSpace: 'nowrap',
+                            width: 'auto'
                         }}
                     >
                         {product.ean}
                     </div>
                 )}
 
-                {/* Texto Customizado - COPIADO DO PREVIEW */}
+                {/* Texto Customizado */}
                 {layoutConfig.customTextVisible && layoutConfig.customText && (
                     <div
                         data-export-text="true"
@@ -347,7 +403,7 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                             top: `${layoutConfig.customTextY}%`,
                             transform: `translate(-50%, -50%) rotate(${layoutConfig.customTextRotation}deg)`,
                             color: layoutConfig.customTextColor,
-                            fontSize: `${layoutConfig.customTextSize / 20}rem`,
+                            fontSize: spx(layoutConfig.customTextSize),
                             fontWeight: 600,
                             whiteSpace: 'nowrap',
                             zIndex: (layoutConfig.layersOrder?.indexOf('customText') ?? 4) + 10,
@@ -358,7 +414,7 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                     </div>
                 )}
 
-                {/* Watermark - COPIADO DO PREVIEW */}
+                {/* Watermark */}
                 {layoutConfig.watermarkVisible && (
                     <div style={{
                         position: 'absolute',
@@ -367,7 +423,7 @@ export const LaminaPage = forwardRef<HTMLDivElement, LaminaPageProps>((
                         transform: 'translate(-50%, -50%) rotate(-90deg)',
                         color: '#efefef',
                         opacity: layoutConfig.watermarkOpacity,
-                        fontSize: '0.8rem',
+                        fontSize: spx(14),
                         whiteSpace: 'nowrap',
                         pointerEvents: 'none',
                         userSelect: 'none'

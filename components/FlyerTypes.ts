@@ -41,6 +41,7 @@ export interface Theme {
     };
     defaultPromoMonth?: string;
     defaultPromoBadge?: string;
+    month?: number; // 1-12 for Jan-Dec, 0 or undefined for none
     isConfigured?: boolean; // True if ALL grid formats are configured
     configuredFormats?: GridFormatKey[]; // List of formats that have been configured
     status?: 'active' | 'pending' | 'archived' | 'draft';
@@ -71,6 +72,7 @@ export interface LayoutConfig {
     columns: number;
     rows: number;
     gap: number;
+    rowGap?: number;
     marginTop: number;
     marginBottom: number;
     marginLeft: number;

@@ -48,8 +48,8 @@ export const SmartImage = ({ urls, style, fallback, crossOrigin }: SmartImagePro
             <img
                 src={urls[currentSrcIndex]}
                 onError={handleError}
-                style={{ opacity: 0, width: '1px', height: '1px', position: 'absolute' }}
-                crossOrigin={crossOrigin}
+                style={{ opacity: 0, width: '1px', height: '1px', position: 'absolute', pointerEvents: 'none' }}
+                crossOrigin={urls[currentSrcIndex]?.startsWith('blob:') ? undefined : crossOrigin}
                 alt=""
             />
         </div>

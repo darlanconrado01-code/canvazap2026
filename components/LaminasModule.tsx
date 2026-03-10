@@ -38,9 +38,8 @@ import {
 } from 'lucide-react';
 import { ProductItem } from './FlyerTypes';
 import { SmartImage } from './SmartImage';
-import html2canvas from 'html2canvas';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+import { LaminaPage } from './LaminaPage';
+import { LaminaExportOrchestrator, LaminaExportOrchestratorRef } from './LaminaExportOrchestrator';
 import { sanitizeAndNormalize } from '../utils/productUtils';
 
 type SlideFormat = 'stories' | 'feed' | 'square' | 'tv';
@@ -67,8 +66,8 @@ const LaminasModule: React.FC<LaminasModuleProps> = ({ isMasterMode = false }) =
     const [showLogoSelector, setShowLogoSelector] = useState(false);
     const [companyName, setCompanyName] = useState('');
     const [isRequestingCreation, setIsRequestingCreation] = useState(false);
-    const [exportCompanyLogoUrl, setExportCompanyLogoUrl] = useState<string | null>(null);
-    const [exportSealUrl, setExportSealUrl] = useState<string | null>(null);
+
+    const exportRef = useRef<LaminaExportOrchestratorRef>(null);
 
     // Layout Configuration (Enriched for Advanced Mode)
     const [layoutConfig, setLayoutConfig] = useState({
@@ -649,121 +648,15 @@ const LaminasModule: React.FC<LaminasModuleProps> = ({ isMasterMode = false }) =
     };
 
     const handleExportAll = async () => {
-        if (products.length === 0) return;
-
+        if (products.length === 0 || !exportRef.current) return;
         setProcessing(true);
-        setStatusMessage("Iniciamos o download das suas lâminas...");
-        const zip = new JSZip();
-        const container = document.getElementById('laminas-export-container');
-        if (!container) {
-            alert("Erro ao preparar exportação.");
-            setProcessing(false);
-            return;
-        }
-
+        setStatusMessage("Iniciamos a exportação das suas lâminas...");
         try {
-            const linkedProducts = products.filter(p => p.isLinked);
-            if (linkedProducts.length === 0) {
-                alert("Nenhuma lâmina pronta para baixar.");
-                setProcessing(false);
-                return;
-            }
-
-            const logoB64 = await intermediador(companyLogoUrl);
-            const sealB64 = await intermediador(layoutConfig.sealUrl);
-            setExportCompanyLogoUrl(logoB64);
-            setExportSealUrl(sealB64);
-
-            setStatusMessage("Não se preocupe! Estamos trabalhando em suas lâminas...");
-
-            // Find index mapping since we iterate linked products but need full list index for state
-            for (let p of linkedProducts) {
-                const currentIndex = linkedProducts.indexOf(p) + 1;
-                setStatusMessage(`Processando ${currentIndex}/${linkedProducts.length} lâminas...`);
-
-                const idx = products.findIndex(item => item.id === p.id);
-                const prodB64 = await intermediador(p.imageUrl);
-
-                // Temporary update products state for export high-res
-                setProducts(current => {
-                    const next = [...current];
-                    if (next[idx]) next[idx] = { ...next[idx], imageUrl: prodB64 };
-                    return next;
-                });
-
-                setActiveSlide(idx);
-                // ESPECIAL: Aguardar fontes e renderização (Layer 2)
-                await document.fonts.ready;
-                // Assentar layout (2 frames)
-                await new Promise(r => requestAnimationFrame(r));
-                await new Promise(r => requestAnimationFrame(r));
-                await new Promise(r => setTimeout(r, 1000)); // Segurança adicional
-
-                const canvas = await html2canvas(container, {
-                    useCORS: true,
-                    scale: 3, // ALTA RESOLUÇÃO
-                    backgroundColor: null,
-                    onclone: (clonedDoc, el) => {
-                        const clonedEl = el as HTMLElement;
-
-                        const body = clonedDoc.body;
-                        body.style.fontSize = '16px';
-                        (body.style as any).webkitFontSmoothing = 'antialiased';
-                        (body.style as any).mozOsxFontSmoothing = 'grayscale';
-                        // body.style.textRendering = 'geometricPrecision'; // Removido global
-
-                        const root = clonedDoc.querySelector('[data-export-root="true"]') || clonedEl;
-
-                        // Targeted Anti-clipping
-                        const textNodes = root.querySelectorAll('[data-export-text="true"]');
-                        textNodes.forEach((node: any) => {
-                            node.style.setProperty('overflow', 'visible', 'important');
-                            node.style.setProperty('display', 'block', 'important');
-
-                            // Subimos até o topo do contêiner de exportação garantindo que nada corte
-                            let p = node.parentElement;
-                            while (p && p !== clonedDoc.body) {
-                                p.style.setProperty('overflow', 'visible', 'important');
-                                p = p.parentElement;
-                            }
-                        });
-                    }
-                });
-
-                const blob = await new Promise<Blob | null>(resolve =>
-                    canvas.toBlob(resolve, 'image/png')
-                );
-
-                if (blob) {
-                    const fileName = `${idx + 1}_${p.description.substring(0, 30).replace(/[/\\?%*:|"<>]/g, '-')}.png`;
-                    zip.file(fileName, blob);
-                }
-            }
-
-            const content = await zip.generateAsync({ type: 'blob' });
-            setStatusMessage("Finalizando download...");
-            saveAs(content, `laminas_${Date.now()}.zip`);
-
-            // --- Stats Tracking ---
-            try {
-                await addDoc(collection(db, 'generated_assets'), {
-                    type: 'lamina',
-                    format: 'zip',
-                    productCount: linkedProducts.length,
-                    companyId: userData?.companyId || 'unknown',
-                    userId: userData?.uid || 'unknown',
-                    userName: userData?.name || 'unknown',
-                    createdAt: serverTimestamp()
-                });
-            } catch (err) {
-                console.error("Error tracking export stats", err);
-            }
+            await exportRef.current.exportAllLaminas();
         } catch (error) {
             console.error(error);
-            alert("Erro ao exportar imagens.");
+            alert("Erro ao exportar lâminas.");
         } finally {
-            setExportCompanyLogoUrl(null);
-            setExportSealUrl(null);
             setProcessing(false);
             setStatusMessage('');
         }
@@ -856,53 +749,10 @@ const LaminasModule: React.FC<LaminasModuleProps> = ({ isMasterMode = false }) =
     };
 
     const handleDownloadSingle = async (index: number) => {
-        setActiveSlide(index);
+        if (!exportRef.current) return;
         setProcessing(true);
-        await new Promise(r => setTimeout(r, 800));
-        const container = document.getElementById('laminas-export-container');
-        if (!container) return;
-
-        // Dynamic width for TV
-        const exportWidth = selectedFormat === 'tv' ? '1920px' : '1080px';
-        container.style.width = exportWidth;
-
         try {
-            const canvas = await html2canvas(container, {
-                useCORS: true,
-                scale: 3,
-                backgroundColor: null,
-                onclone: (clonedDoc) => {
-                    const textNodes = clonedDoc.querySelectorAll('[data-export-text="true"]');
-                    textNodes.forEach((node: any) => {
-                        node.style.setProperty('overflow', 'visible', 'important');
-                        let p = node.parentElement;
-                        while (p && p !== clonedDoc.body) {
-                            p.style.setProperty('overflow', 'visible', 'important');
-                            p = p.parentElement;
-                        }
-                    });
-                }
-            });
-            canvas.toBlob(async (blob) => {
-                if (blob) {
-                    saveAs(blob, `lamina_${products[index].ean || index}.png`);
-
-                    // --- Stats Tracking ---
-                    try {
-                        await addDoc(collection(db, 'generated_assets'), {
-                            type: 'lamina',
-                            format: 'single',
-                            productCount: 1,
-                            companyId: userData?.companyId || 'unknown',
-                            userId: userData?.uid || 'unknown',
-                            userName: userData?.name || 'unknown',
-                            createdAt: serverTimestamp()
-                        });
-                    } catch (err) {
-                        console.error("Error tracking export stats", err);
-                    }
-                }
-            });
+            await exportRef.current.exportSingleLamina(index);
         } catch (error) {
             console.error(error);
         } finally {
@@ -950,325 +800,59 @@ const LaminasModule: React.FC<LaminasModuleProps> = ({ isMasterMode = false }) =
     const renderLaminaPreview = (product: ProductItem, index: number, isThumbnail = false) => {
         if (!product) return null;
 
-        // Exact ratios matching user request: Feed (1080x1350), Post (1080x1080), Stories (1080x1980)
-        const getRatio = () => {
-            if (selectedFormat === 'stories') return '1080/1980';
-            if (selectedFormat === 'feed') return '1080/1350';
-            if (selectedFormat === 'tv') return '1920/1080';
-            return '1/1';
-        };
-
         return (
-            <div className={`aspect-ratio-box ${isThumbnail ? 'thumbnail' : ''}`} style={{
-                aspectRatio: getRatio(),
-                width: '100%',
-                cursor: isThumbnail ? 'pointer' : 'default',
-                position: 'relative',
-                overflow: 'hidden', // Enforcing "closed box"
-                backgroundColor: 'white' // Ensure it looks like a box even if image fails
-            }} onClick={() => isThumbnail && setActiveSlide(index)}>
-                <div className="slide-content">
-                    {product.isLinked ? (
-                        <>
-                            {selectedFormat === 'tv' && layoutConfig.tvGradientVisible && (
-                                <div style={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    width: '100%',
-                                    height: '100%',
-                                    background: layoutConfig.tvGradientDirection === 'right'
-                                        ? `linear-gradient(to right, transparent 0%, ${layoutConfig.tvGradientColor} 100%)`
-                                        : `linear-gradient(to left, transparent 0%, ${layoutConfig.tvGradientColor} 100%)`,
-                                    zIndex: 1
-                                }} />
-                            )}
-                            <img
-                                src={product.imageUrl}
-                                style={{
-                                    width: `${(layoutConfig.productScale || 1) * 100}%`,
-                                    height: `${(layoutConfig.productScale || 1) * 100}%`,
-                                    objectFit: 'cover',
-                                    transform: `translate(-50%, calc(-50% + ${layoutConfig.yOffset || 0}px))`, // Centered positioning for better "fill" control
-                                    position: 'absolute',
-                                    left: selectedFormat === 'tv' && layoutConfig.tvGradientVisible
-                                        ? `${(layoutConfig.tvGradientDirection === 'right' ? 30 : 70) + ((layoutConfig.productX || 50) - 50)}%`
-                                        : `${layoutConfig.productX || 50}%`,
-                                    top: `${layoutConfig.productY || 50}%`,
-                                    zIndex: 0
-                                }}
-                            />
-                        </>
-                    ) : (
-                        <div className="placeholder-slide">
-                            <ImageIcon size={isThumbnail ? 30 : 60} style={{ opacity: 0.1 }} />
-                            <p style={{ fontSize: isThumbnail ? '0.6rem' : '0.8rem' }}>Sem Imagem</p>
-                        </div>
-                    )}
-
-                    {/* Overlay Elements */}
-                    <div className="overlay-layer">
-                        {layoutConfig.logoVisible && (
-                            (companyLogoUrl || exportCompanyLogoUrl || isMasterMode) ? (
-                                <div style={{
-                                    position: 'absolute',
-                                    left: `${layoutConfig.logoX ?? 50}%`,
-                                    top: `${layoutConfig.logoY ?? 14}%`,
-                                    transform: `translate(-50%, -50%) scale(${(layoutConfig.logoScale || 0.24) * (isThumbnail ? 4 : 8)})`,
-                                    zIndex: (layoutConfig.layersOrder?.indexOf('logo') ?? 3) + 10,
-                                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))'
-                                }}>
-                                    <img
-                                        src={exportCompanyLogoUrl || companyLogoUrl || 'https://via.placeholder.com/150x150/png?text=LOGO'}
-                                        style={{ maxWidth: '100px', maxHeight: '100px', objectFit: 'contain', display: 'block' }}
-                                    />
-                                </div>
-                            ) : null
-                        )}
-
-                        {layoutConfig.sealVisible && (
-                            <div style={{
-                                position: 'absolute',
-                                left: `${layoutConfig.sealX}%`,
-                                top: `${layoutConfig.sealY}%`,
-                                transform: `translate(-50%, -50%) scale(${layoutConfig.sealScale * (isThumbnail ? 3 : 5)})`,
-                                zIndex: (layoutConfig.layersOrder?.indexOf('seal') ?? 2) + 10
-                            }}>
-                                <img src={exportSealUrl || layoutConfig.sealUrl} style={{ width: '100px', height: '100px', objectFit: 'contain' }} />
-                                {layoutConfig.priceVisible && product.price && (
-                                    <div style={{
-                                        position: 'absolute',
-                                        left: `${50 + (layoutConfig.priceXOffset || 0)}%`,
-                                        top: `${50 + (layoutConfig.priceYOffset || 0)}%`,
-                                        transform: `translate(-50%, -50%) scale(${layoutConfig.priceScale})`,
-                                        color: layoutConfig.colorPrice,
-                                        fontWeight: 950,
-                                        fontSize: '1.4rem'
-                                    }}>
-                                        {(() => {
-                                            const parts = formatPrice(product.price);
-                                            if (!parts) return null;
-                                            return (
-                                                <div style={{ display: 'flex', flexDirection: layoutConfig.currencySymbolPosition === 'top' ? 'column' : 'row', alignItems: layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start'), lineHeight: 1 }}>
-                                                    {layoutConfig.currencySymbolVisible && (
-                                                        <span style={{
-                                                            fontSize: `${layoutConfig.currencySymbolScale || 0.7}em`,
-                                                            marginRight: layoutConfig.currencySymbolPosition === 'top' ? '0' : '2px',
-                                                            marginBottom: layoutConfig.currencySymbolPosition === 'top' ? '-5px' : '0',
-                                                            alignSelf: layoutConfig.currencySymbolPosition === 'before' ? 'center' : (layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start')),
-                                                            marginTop: layoutConfig.currencySymbolPosition === 'superscript' ? '4px' : '0',
-                                                            transform: `translate(${layoutConfig.priceCurrencyXOffset || 0}px, ${layoutConfig.priceCurrencyYOffset || 0}px)`,
-                                                            display: 'inline-block'
-                                                        }}>R$</span>
-                                                    )}
-                                                    <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                        <span style={{ transform: `translate(${layoutConfig.priceRealXOffset || 0}px, ${layoutConfig.priceRealYOffset || 0}px)`, display: 'inline-block' }}>{parts.int}</span>
-                                                        <span style={{
-                                                            fontSize: `${layoutConfig.priceCentsScale || 0.6}em`,
-                                                            marginTop: '2px',
-                                                            transform: `translate(${layoutConfig.priceCentsXOffset || 0}px, ${layoutConfig.priceCentsYOffset || 0}px)`,
-                                                            display: 'inline-block'
-                                                        }}>,{parts.cents}</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {!layoutConfig.sealVisible && layoutConfig.priceVisible && product.price && (
-                            <div
-                                data-export-text="true"
-                                style={{
-                                    position: 'absolute',
-                                    left: `${layoutConfig.priceX + (layoutConfig.priceXOffset || 0)}%`,
-                                    top: `${layoutConfig.priceY + (layoutConfig.priceYOffset || 0)}%`,
-                                    transform: `translate(-50%, -50%) scale(${layoutConfig.priceScale * (isThumbnail ? 1 : 1.5)})`,
-                                    color: layoutConfig.colorPrice,
-                                    fontWeight: 950,
-                                    fontSize: '1.4rem'
-                                }}
-                            >
-                                {(() => {
-                                    const parts = formatPrice(product.price);
-                                    if (!parts) return null;
-                                    return (
-                                        <div style={{ display: 'flex', flexDirection: layoutConfig.currencySymbolPosition === 'top' ? 'column' : 'row', alignItems: layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start'), lineHeight: 1 }}>
-                                            {layoutConfig.currencySymbolVisible && (
-                                                <span style={{
-                                                    fontSize: `${layoutConfig.currencySymbolScale || 0.7}em`,
-                                                    marginRight: layoutConfig.currencySymbolPosition === 'top' ? '0' : '2px',
-                                                    marginBottom: layoutConfig.currencySymbolPosition === 'top' ? '-10px' : '0',
-                                                    alignSelf: layoutConfig.currencySymbolPosition === 'before' ? 'center' : (layoutConfig.currencySymbolPosition === 'subscript' ? 'flex-end' : (layoutConfig.currencySymbolPosition === 'top' ? 'center' : 'flex-start')),
-                                                    marginTop: layoutConfig.currencySymbolPosition === 'superscript' ? '4px' : '0',
-                                                    transform: `translate(${layoutConfig.priceCurrencyXOffset || 0}px, ${layoutConfig.priceCurrencyYOffset || 0}px)`,
-                                                    display: 'inline-block'
-                                                }}>R$</span>
-                                            )}
-                                            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                                <span style={{ transform: `translate(${layoutConfig.priceRealXOffset || 0}px, ${layoutConfig.priceRealYOffset || 0}px)`, display: 'inline-block' }}>{parts.int}</span>
-                                                <span style={{
-                                                    fontSize: `${layoutConfig.priceCentsScale || 0.6}em`,
-                                                    marginTop: '2px',
-                                                    transform: `translate(${layoutConfig.priceCentsXOffset || 0}px, ${layoutConfig.priceCentsYOffset || 0}px)`,
-                                                    display: 'inline-block'
-                                                }}>,{parts.cents}</span>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
-                        )}
-
-                        {layoutConfig.descVisible && (
-                            <div
-                                data-export-text="true"
-                                style={{
-                                    position: 'absolute',
-                                    left: `${layoutConfig.descX}%`,
-                                    bottom: `${layoutConfig.descY}%`,
-                                    transform: 'translateX(-50%)',
-                                    color: layoutConfig.colorDescription,
-                                    fontSize: (() => {
-                                        const baseSize = layoutConfig.fontSizeDescription / (isThumbnail ? 4 : 2);
-                                        const text = product.normalizedDescription || product.description || '';
-                                        if (text.length > 60) return `${baseSize * 0.7}rem`;
-                                        if (text.length > 40) return `${baseSize * 0.8}rem`;
-                                        if (text.length > 25) return `${baseSize * 0.9}rem`;
-                                        return `${baseSize}rem`;
-                                    })(),
-                                    fontWeight: 800,
-                                    textAlign: 'center',
-                                    width: '90%',
-                                    zIndex: (layoutConfig.layersOrder?.indexOf('description') ?? 1) + 10,
-                                    height: 'auto',
-                                    minHeight: `${(layoutConfig.fontSizeDescription / (isThumbnail ? 4 : 2)) * 1.5}rem`,
-                                    lineHeight: '1.1',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: '0.1rem 0'
-                                }}
-                            >
-                                <span style={{
-                                    display: 'block',
-                                    width: '100%',
-                                    overflow: 'visible',
-                                    wordBreak: 'break-word'
-                                }}>
-                                    {product.normalizedDescription || product.description}
-                                </span>
-                            </div>
-                        )}
-
-                        {layoutConfig.showInternalCode && product.internalCode && (
-                            <div
-                                data-export-text="true"
-                                style={{
-                                    position: 'absolute',
-                                    left: `${layoutConfig.codeInternalX}%`,
-                                    bottom: `${layoutConfig.codeInternalY}%`,
-                                    transform: 'translateX(-50%)',
-                                    color: layoutConfig.colorInternalCode,
-                                    fontSize: `${(layoutConfig.fontSizeInternalCode / (isThumbnail ? 4 : 2))}rem`,
-                                    fontWeight: 700,
-                                    zIndex: (layoutConfig.layersOrder?.indexOf('codes') ?? 0) + 10,
-                                    textShadow: layoutConfig.codeShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
-                                    WebkitTextStroke: layoutConfig.codeStroke ? `1px ${layoutConfig.colorInternalCode === '#ffffff' ? 'black' : 'white'}` : 'none'
-                                }}
-                            >
-                                {product.internalCode}
-                            </div>
-                        )}
-
-                        {layoutConfig.showEan && product.ean && (
-                            <div
-                                data-export-text="true"
-                                style={{
-                                    position: 'absolute',
-                                    left: `${layoutConfig.codeEanX}%`,
-                                    bottom: `${layoutConfig.codeEanY}%`,
-                                    transform: 'translateX(-50%)',
-                                    color: layoutConfig.colorEan,
-                                    fontSize: `${(layoutConfig.fontSizeEan / (isThumbnail ? 4 : 2))}rem`,
-                                    fontWeight: 700,
-                                    textShadow: layoutConfig.codeShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
-                                    WebkitTextStroke: layoutConfig.codeStroke ? `1px ${layoutConfig.colorEan === '#ffffff' ? 'black' : 'white'}` : 'none'
-                                }}
-                            >
-                                {product.ean}
-                            </div>
-                        )}
-
-                        {layoutConfig.customTextVisible && layoutConfig.customText && (
-                            <div
-                                data-export-text="true"
-                                style={{
-                                    position: 'absolute',
-                                    left: `${layoutConfig.customTextX}%`,
-                                    top: `${layoutConfig.customTextY}%`,
-                                    transform: `translate(-50%, -50%) rotate(${layoutConfig.customTextRotation}deg)`,
-                                    color: layoutConfig.customTextColor,
-                                    fontSize: `${layoutConfig.customTextSize / (isThumbnail ? 40 : 20)}rem`,
-                                    fontWeight: 600,
-                                    whiteSpace: 'nowrap',
-                                    zIndex: (layoutConfig.layersOrder?.indexOf('customText') ?? 4) + 10,
-                                    textTransform: 'uppercase'
-                                }}
-                            >
-                                {layoutConfig.customText}
-                            </div>
-                        )}
-
-                        {layoutConfig.watermarkVisible && (
-                            <div style={{
-                                position: 'absolute',
-                                left: '4%',
-                                top: '50%',
-                                transform: 'translate(-50%, -50%) rotate(-90deg)',
-                                color: '#efefef',
-                                opacity: layoutConfig.watermarkOpacity,
-                                fontSize: isThumbnail ? '0.4rem' : '0.8rem',
-                                whiteSpace: 'nowrap',
-                                pointerEvents: 'none',
-                                userSelect: 'none'
-                            }}>
-                                {userData?.displayName || layoutConfig.watermarkText} - CanvaZap
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {
-                    isThumbnail && (
-                        <button
-                            className="btn-thumbnail-download"
-                            onClick={(e) => { e.stopPropagation(); handleDownloadSingle(index); }}
-                            style={{ position: 'absolute', bottom: '8px', right: '8px', width: '28px', height: '28px', borderRadius: '50%', background: '#3b82f6', color: 'white', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', zIndex: 120, cursor: 'pointer' }}
-                        >
-                            <DownloadCloud size={14} />
-                        </button>
-                    )
-                }
-            </div >
+            <div
+                className={`item-box-unified ${isThumbnail ? 'thumbnail' : ''}`}
+                style={{
+                    width: '100%',
+                    cursor: isThumbnail ? 'pointer' : 'default',
+                    position: 'relative',
+                    overflow: 'visible',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}
+                onClick={() => isThumbnail && setActiveSlide(index)}
+            >
+                <LaminaPage
+                    product={product}
+                    layoutConfig={layoutConfig}
+                    companyLogoUrl={companyLogoUrl}
+                    selectedFormat={selectedFormat === 'square' ? 'post' : selectedFormat}
+                    scale={isThumbnail ? 0.25 : 0.6}
+                    isExport={false}
+                />
+                {isThumbnail && (
+                    <button
+                        className="btn-thumbnail-download"
+                        onClick={(e) => { e.stopPropagation(); handleDownloadSingle(index); }}
+                        style={{
+                            position: 'absolute',
+                            bottom: '8px',
+                            right: '8px',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            background: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                            zIndex: 120,
+                            cursor: 'pointer'
+                        }}
+                    >
+                        <DownloadCloud size={14} />
+                    </button>
+                )}
+            </div>
         );
     };
 
     return (
         <div className="fade-in module-container">
-            {/* hidden container for high-res capture */}
-            <div id="laminas-export-container" style={{
-                position: 'fixed',
-                left: '-9999px',
-                top: 0,
-                width: selectedFormat === 'tv' ? '1920px' : '1080px',
-                zIndex: -1
-            }}>
-                {products.length > 0 && renderLaminaPreview(products[activeSlide], activeSlide)}
-            </div>
-
             <div className="module-layout">
                 {/* LEFT SIDEBAR */}
                 {/* LEFT SIDEBAR */}
@@ -2094,6 +1678,24 @@ const LaminasModule: React.FC<LaminasModuleProps> = ({ isMasterMode = false }) =
                                     </p>
                                 </div>
                             )}
+                            {products.length > 0 && products[activeSlide] && (
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'center',
+                                    marginBottom: '3rem'
+                                }}>
+                                    <div style={{
+                                        width: '100%',
+                                        maxWidth: selectedFormat === 'tv' ? '800px' : '640px',
+                                        boxShadow: '0 20px 50px rgba(0, 0, 0, 0.15)',
+                                        borderRadius: '8px',
+                                        overflow: 'hidden',
+                                        border: '1px solid #e2e8f0'
+                                    }}>
+                                        {renderLaminaPreview(products[activeSlide], activeSlide, false)}
+                                    </div>
+                                </div>
+                            )}
 
                             {foundCount > 0 && (
                                 <button
@@ -2194,7 +1796,16 @@ const LaminasModule: React.FC<LaminasModuleProps> = ({ isMasterMode = false }) =
                     .module-main { minHeight: 400px; padding: 1rem; }
                 }
             `}</style>
-        </div >
+
+            <LaminaExportOrchestrator
+                ref={exportRef}
+                products={products}
+                layoutConfig={layoutConfig}
+                companyLogoUrl={companyLogoUrl}
+                selectedFormat={selectedFormat === 'square' ? 'post' : selectedFormat}
+                onProgress={setStatusMessage}
+            />
+        </div>
     );
 };
 

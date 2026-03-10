@@ -27,7 +27,7 @@ import JoinCompany from './components/JoinCompany';
 import VaccineBlastsModule from './components/VaccineBlastsModule';
 import AntiparasiticBlastsModule from './components/AntiparasiticBlastsModule';
 import PetVilleBlastsModule from './components/PetVilleBlastsModule';
-import MetaLeadsModule from './components/MetaLeadsModule';
+
 import LocucoesModule from './components/LocucoesModule';
 import TutorialsModule from './components/TutorialsModule';
 import BadgeManagementModule from './components/BadgeManagementModule';
@@ -258,7 +258,7 @@ function App() {
             <Route path="/disparos-vacinas" element={<ProtectedRoute><VaccineBlastsModule /></ProtectedRoute>} />
             <Route path="/disparos-antiparasitarios" element={<ProtectedRoute><AntiparasiticBlastsModule /></ProtectedRoute>} />
             <Route path="/disparos-petville" element={<ProtectedRoute><PetVilleBlastsModule /></ProtectedRoute>} />
-            <Route path="/meta-leads" element={<ProtectedRoute><MetaLeadsModule /></ProtectedRoute>} />
+
             <Route path="/locucoes" element={<ProtectedRoute><LocucoesModule /></ProtectedRoute>} />
             <Route path="/tutoriais" element={<ProtectedRoute><TutorialsModule /></ProtectedRoute>} />
           </Route>

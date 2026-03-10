@@ -196,28 +196,7 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                     </div>
                 )}
 
-                {/* Promo Badge / Day Layer */}
-                {layoutConfig.promoBadge && layoutConfig.promoBadge.visible && (
-                    <div
-                        data-export-text="true"
-                        style={{
-                            position: 'absolute',
-                            left: `${layoutConfig.promoBadge.x}%`,
-                            top: spx_page(layoutConfig.promoBadge.y),
-                            transform: `translateX(-50%) scale(${layoutConfig.promoBadge.scale})`,
-                            fontSize: spx_page(layoutConfig.promoBadge.fontSize),
-                            color: layoutConfig.promoBadge.color,
-                            fontWeight: 900,
-                            textTransform: 'uppercase',
-                            textAlign: 'center',
-                            zIndex: 55,
-                            whiteSpace: 'nowrap',
-                            textShadow: `0 ${spx_page(2)} ${spx_page(4)} rgba(0,0,0,0.1)`
-                        }}
-                    >
-                        {layoutConfig.promoBadge.text}
-                    </div>
-                )}
+
 
                 {/* Grid Content */}
                 <div style={{
@@ -231,7 +210,10 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                     gridTemplateColumns: `repeat(${layoutConfig.columns}, 1fr)`,
                     gridTemplateRows: `repeat(${layoutConfig.rows}, 1fr)`,
                     columnGap: spx(layoutConfig.gap),
-                    rowGap: spx(layoutConfig.rowGap || layoutConfig.gap)
+                    rowGap: spx(layoutConfig.rowGap !== undefined ? layoutConfig.rowGap : layoutConfig.gap),
+                    // REGRA DE OURO: O conteúdo deve respeitar as margens.
+                    // Overflow hidden aqui garante que cards escalados não invadam a área das margens.
+                    overflow: 'hidden'
                 }}>
                     {products.map((product) => {
                         // Card Style Logic
@@ -356,6 +338,7 @@ export const FlyerPage = forwardRef<HTMLDivElement, FlyerPageProps>(({
                                                                 marginBottom: spx(layoutConfig.spacingBelowDescription),
                                                                 textAlign: 'center',
                                                                 width: '100%',
+                                                                color: layoutConfig.colorDescription,
                                                                 fontSize: (() => {
                                                                     const text = product.normalizedDescription || product.description || '';
                                                                     if (text.length > 50) return `${Math.round(fontPx * 0.7)}px`;

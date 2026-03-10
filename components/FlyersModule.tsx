@@ -126,6 +126,7 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
     const [isSendingWhatsapp, setIsSendingWhatsapp] = useState(false);
     const [logoVariations, setLogoVariations] = useState<string[]>([]);
     const [showLogoSelector, setShowLogoSelector] = useState(false);
+    const [showOnlyWithPhoto, setShowOnlyWithPhoto] = useState(true);
 
     // Phone Request Modal
     const [showPhoneModal, setShowPhoneModal] = useState(false);
@@ -453,6 +454,31 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                 return availability.includes(availabilityFilter);
             });
 
+            // 4. Sort by Month Priority
+            const currentMonth = new Date().getMonth() + 1; // 1-12
+            finalFiltered.sort((a, b) => {
+                const monthA = a.month || 0;
+                const monthB = b.month || 0;
+
+                // Priority 1: Current Month
+                if (monthA === currentMonth && monthB !== currentMonth) return -1;
+                if (monthB === currentMonth && monthA !== currentMonth) return 1;
+
+                // Priority 2: Any month set (non-zero) comes before general (zero)
+                if (monthA !== 0 && monthB === 0) return -1;
+                if (monthA === 0 && monthB !== 0) return 1;
+
+                // Priority 3: Upcoming months (if current is 3, then 4, 5... are better than 1, 2)
+                if (monthA !== 0 && monthB !== 0) {
+                    const adjA = monthA >= currentMonth ? monthA : monthA + 12;
+                    const adjB = monthB >= currentMonth ? monthB : monthB + 12;
+                    if (adjA !== adjB) return adjA - adjB;
+                }
+
+                // Priority 4: Name alphabetical
+                return a.name.localeCompare(b.name);
+            });
+
             setThemes(finalFiltered);
 
             // Sync selection
@@ -550,13 +576,6 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                         finalConfig.promoMonth = {
                             ...(finalConfig.promoMonth || DEFAULT_LAYOUT_CONFIG.promoMonth),
                             text: freshThemeData.defaultPromoMonth,
-                            visible: true
-                        };
-                    }
-                    if (freshThemeData.defaultPromoBadge) {
-                        finalConfig.promoBadge = {
-                            ...(finalConfig.promoBadge || DEFAULT_LAYOUT_CONFIG.promoBadge),
-                            text: freshThemeData.defaultPromoBadge,
                             visible: true
                         };
                     }
@@ -1056,7 +1075,7 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
             }
 
             // 6. Legacy Webhook (with AbortController for timeout)
-            const legacyWebhookUrl = 'https://n8n.canvazap.com.br/webhook/d7dc1ef8-a1cd-45db-8aae-55c82e28a01f';
+            const legacyWebhookUrl = 'https://n8n.canvazap.com.br/webhook/71027f63-976d-4dd1-adaf-abbf83ecb919';
 
             try {
                 const controller = new AbortController();
@@ -1093,59 +1112,103 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
     const processInput = async () => {
         if (!inputText.trim()) return;
 
-        const lines = inputText.split('\n').filter(l => l.trim());
-        const newProducts: ProductItem[] = lines.map((line, index) => {
-            const normalizedData = sanitizeAndNormalize(line);
+        const lines = inputText.split('\n').filter(l => l.trim().length > 0);
+        const newProducts: ProductItem[] = [];
 
-            // Check for tabs or multiple spaces (Excel copy/paste) as fallback/override
-            const columns = line.split(/\t| {4,}/).map(c => c.trim()).filter(c => c);
+        lines.forEach((line, index) => {
+            let processedLine = line.trim();
 
-            let description = normalizedData.description;
-            let price = normalizedData.price ? `R$ ${normalizedData.price}` : '';
-            if (normalizedData.priceInt && normalizedData.priceDec) {
-                // Keep the price consistent
-            }
-            let ean = normalizedData.ean;
-            let internalCode = normalizedData.cod;
-            let category = '';
-            let packaging = normalizedData.packaging;
-
-            if (columns.length >= 2) {
-                // Multi-column parse might have better data if from Excel
-                // This block is kept for potential future enhancements or specific Excel parsing needs,
-                // but the initial values are now from `sanitizeAndNormalize`.
-                // If `columns` provide more accurate or different data, it can override here.
-                // For now, we rely primarily on `sanitizeAndNormalize`.
+            // Ignorar linhas de cabeçalho comuns (que contêm "EAN" ou "Código" mas não são dados)
+            if (/^(cod|código|ean|produto|descrição)/i.test(processedLine) && !/\d{8,}/.test(processedLine)) {
+                return;
             }
 
-            return {
-                id: `p-${Date.now()}-${index}`,
-                rawText: line,
-                description: description || 'Sem nome',
-                normalizedDescription: normalizedData.normalizedDescription,
-                price: price || '',
-                ean: ean || '',
-                internalCode: internalCode || '',
-                category: category || '',
-                packaging: packaging || '',
-                candidateUrls: ean ? [
-                    `https://imagens.canvazap.com.br/encartes/${ean}.jpg`,
-                    `https://imagens.canvazap.com.br/catalogo/${ean}.jpg`,
-                    `https://imagens.canvazap.com.br/laminas/${ean}.jpg`
-                ] : [],
-                loadingFirestore: true,
-                isLinked: false
-            };
+            // 1. Extract EAN (Sequence of 8 to 14 digits) - Strongest Anchor
+            // We look for the last sequence of 7-14 digits to avoid confusing with internal code
+            let ean = '';
+            const eanMatch = processedLine.match(/(\d{7,14})\s*$/); // EAN usually at the end
+            if (eanMatch) {
+                ean = eanMatch[1];
+                processedLine = processedLine.replace(eanMatch[0], '').trim();
+            } else {
+                // Try finding anywhere if not at end
+                const anyEanMatch = processedLine.match(/\b(\d{7,14})\b/);
+                if (anyEanMatch && parseInt(anyEanMatch[1]) > 999999) { // Avoid short codes misidentified as EAN
+                    ean = anyEanMatch[1];
+                    processedLine = processedLine.replace(anyEanMatch[0], '').trim();
+                }
+            }
+
+            // 2. Extract Price (R$ XX,XX or just XX,XX)
+            let price = '';
+            // Regex for price: R$ followed by digits,dots,comma
+            const priceMatch = processedLine.match(/(R\$ ?)?\s*(\d{1,3}(\.\d{3})*,\d{2})/);
+            if (priceMatch) {
+                price = priceMatch[2]; // Capture just the number part
+                processedLine = processedLine.replace(priceMatch[0], '').trim();
+            } else {
+                // Try simpler float match if R$ missing
+                const simplePrice = processedLine.match(/\b\d+,\d{2}\b/);
+                if (simplePrice) {
+                    price = simplePrice[0];
+                    processedLine = processedLine.replace(simplePrice[0], '').trim();
+                }
+            }
+
+            // 3. Extract Internal Code (Digits at start of line)
+            let internalCode = '';
+            const codeMatch = processedLine.match(/^(\d+)\s+/);
+            // Only consider it a code if it's separate from the description (followed by space) -> and length < 7 usually
+            if (codeMatch && codeMatch[1].length < 8) {
+                internalCode = codeMatch[1];
+                processedLine = processedLine.replace(codeMatch[0], '').trim();
+            }
+
+            // 4. Packaging (Simple heuristc: 000g, 1kg, 2L, un, cx)
+            let packaging = '';
+            const packMatch = processedLine.match(/\b(\d+(g|kg|ml|l|un|cx)|cx|un|pc|pç|fardo)\b/i);
+            if (packMatch) {
+                packaging = packMatch[0];
+                // Don't remove packaging from description as it's often part of the name, 
+                // but we can optionally clean it if desired. Let's keep it in name for safety, 
+                // just filling the field.
+            }
+
+            // 5. Remaining is Description
+            // Cleanup tabs or extra spaces
+            let description = processedLine.replace(/\s+/g, ' ').trim();
+
+            if (description || ean || internalCode) {
+                newProducts.push({
+                    id: `p-${Date.now()}-${index}`,
+                    rawText: line,
+                    description: description || 'Produto sem nome',
+                    price: price,
+                    ean: ean.replace(/\D/g, ''),
+                    internalCode: internalCode,
+                    category: 'Geral',
+                    packaging: packaging,
+                    candidateUrls: [],
+                    loadingFirestore: true,
+                    isLinked: false
+                });
+            }
         });
+
+        if (newProducts.length === 0) {
+            alert("Nenhum produto identificado. Tente copiar e colar apenas os dados, linha por linha.");
+            return;
+        }
 
         setProducts(newProducts);
         setSelectedCategory('all');
         setActiveTab('theme');
         setCurrentPreviewPage(0);
 
-        for (let i = 0; i < newProducts.length; i++) {
-            checkFirestoreForProduct(newProducts[i], i);
-        }
+        // Trigger verification
+        newProducts.forEach((p, i) => {
+            checkFirestoreForProduct(p, i);
+        });
     };
 
     const checkFirestoreForProduct = async (product: ProductItem, index: number) => {
@@ -1259,37 +1322,30 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                 }, { merge: true }).catch(() => { });
             }
 
-            setProducts(prev => {
-                const next = [...prev];
-                if (next[index]) {
-                    next[index] = {
-                        ...next[index],
-                        ean: finalEan,
-                        candidateUrls: updatedCandidates,
-                        imageUrl: finalImageUrl,
-                        loadingFirestore: false,
-                        loadingImage: false,
-                        isLinked: hasFoundImage
-                    };
-                }
-                return next;
-            });
+            setProducts(prev => prev.map(p =>
+                p.id === product.id ? {
+                    ...p,
+                    ean: finalEan,
+                    candidateUrls: updatedCandidates,
+                    imageUrl: finalImageUrl,
+                    loadingFirestore: false,
+                    loadingImage: false,
+                    isLinked: hasFoundImage
+                } : p
+            ));
         } catch (e) {
             console.error("Firestore lookup failed", e);
-            setProducts(prev => {
-                const next = [...prev];
-                if (next[index]) {
-                    next[index] = { ...next[index], loadingFirestore: false, loadingImage: false };
-                }
-                return next;
-            });
+            setProducts(prev => prev.map(p =>
+                p.id === product.id ? { ...p, loadingFirestore: false, loadingImage: false } : p
+            ));
         }
     };
 
     const itemsPerPage = layoutConfig.columns * layoutConfig.rows;
     const filteredByCategory = products.filter(p => selectedCategory === 'all' || p.category === selectedCategory);
-    const filteredForPages = filteredByCategory.filter(p => p.isLinked);
-    const missingCount = filteredByCategory.length - filteredForPages.length;
+    const linkedProducts = filteredByCategory.filter(p => p.isLinked);
+    const filteredForPages = showOnlyWithPhoto ? linkedProducts : filteredByCategory;
+    const missingCount = filteredByCategory.length - linkedProducts.length;
     const totalPages = Math.ceil(filteredForPages.length / itemsPerPage);
     const pages = Array.from({ length: totalPages }, (_, i) => filteredForPages.slice(i * itemsPerPage, (i + 1) * itemsPerPage));
 
@@ -1474,10 +1530,29 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
 
                                 {products.length > 0 && (
                                     <div style={{ marginTop: '2rem' }}>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>
-                                            {filterOnlyMissing ? `${unavailableProducts.length} Itens pendentes` : `${products.length} Itens detectados`}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                            <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>
+                                                {filterOnlyMissing ? `${unavailableProducts.length} Itens pendentes` : `${products.length} Itens detectados`}
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm("Deseja limpar toda a lista de produtos?")) setProducts([]);
+                                                }}
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    color: '#ef4444',
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px'
+                                                }}
+                                            >
+                                                <Trash2 size={12} /> Limpar Lista
+                                            </button>
                                         </div>
-
                                         {unavailableProducts.length > 0 && (
                                             <div style={{ padding: '0.75rem', background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '8px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#92400e' }}>
@@ -1647,6 +1722,18 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                                                                     <Check size={14} />
                                                                 </div>
                                                             )}
+
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setProducts(prev => prev.filter(prod => prod.id !== p.id));
+                                                                }}
+                                                                title="Remover produto"
+                                                                className="btn-icon"
+                                                                style={{ width: '28px', height: '28px', color: '#64748b' }}
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -1730,8 +1817,32 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                                 )}
                                 {products.length > 0 && (
                                     <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 700, textTransform: 'uppercase' }}>
-                                            Filtrar por Categoria
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                                                Filtrar por Categoria
+                                            </div>
+
+                                            {/* Somente produtos com foto Toggle */}
+                                            <button
+                                                onClick={() => setShowOnlyWithPhoto(!showOnlyWithPhoto)}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    background: showOnlyWithPhoto ? '#f0fdf4' : '#fff1f1',
+                                                    border: `1px solid ${showOnlyWithPhoto ? '#bbf7d0' : '#fecaca'}`,
+                                                    borderRadius: '20px',
+                                                    padding: '4px 10px',
+                                                    fontSize: '0.7rem',
+                                                    fontWeight: 700,
+                                                    color: showOnlyWithPhoto ? '#166534' : '#991b1b',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                            >
+                                                {showOnlyWithPhoto ? <Check size={12} /> : <X size={12} />}
+                                                Somente produtos com foto
+                                            </button>
                                         </div>
                                         <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', scrollbarWidth: 'none' }}>
                                             <button
@@ -2194,11 +2305,11 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                             }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <AlertCircle size={20} color="#f97316" />
-                                    <h3 style={{ fontSize: '0.85rem', fontWeight: 800, margin: 0 }}>Possuímos {filteredForPages.length} de {filteredByCategory.length} imagens</h3>
+                                    <h3 style={{ fontSize: '0.85rem', fontWeight: 800, margin: 0 }}>Possuímos {linkedProducts.length} de {filteredByCategory.length} imagens</h3>
                                 </div>
 
                                 <p style={{ fontSize: '0.7rem', margin: 0, opacity: 0.9, lineHeight: '1.4' }}>
-                                    Itens sem imagem foram ocultados. Você pode solicitar o cadastro ou enviar fotos no Banco de Imagens.
+                                    {showOnlyWithPhoto ? 'Itens sem imagem foram ocultados do encarte.' : 'Exibindo todos os itens, inclusive os sem imagem.'} Você pode solicitar o cadastro ou enviar fotos no Banco de Imagens.
                                 </p>
 
                                 <button
@@ -2597,10 +2708,14 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                                         </div>
 
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
-                                            <div><label>Topo (mm)</label><input className="form-input" type="number" value={layoutConfig.marginTop} onChange={e => setLayoutConfig({ ...layoutConfig, marginTop: Number(e.target.value) })} /></div>
-                                            <div><label>Base (mm)</label><input className="form-input" type="number" value={layoutConfig.marginBottom} onChange={e => setLayoutConfig({ ...layoutConfig, marginBottom: Number(e.target.value) })} /></div>
-                                            <div><label>Esq (mm)</label><input className="form-input" type="number" value={layoutConfig.marginLeft} onChange={e => setLayoutConfig({ ...layoutConfig, marginLeft: Number(e.target.value) })} /></div>
-                                            <div><label>Dir (mm)</label><input className="form-input" type="number" value={layoutConfig.marginRight} onChange={e => setLayoutConfig({ ...layoutConfig, marginRight: Number(e.target.value) })} /></div>
+                                            <div><label>Topo (Unidades)</label><input className="form-input" type="number" value={layoutConfig.marginTop} onChange={e => setLayoutConfig({ ...layoutConfig, marginTop: Number(e.target.value) })} /></div>
+                                            <div><label>Base (Unidades)</label><input className="form-input" type="number" value={layoutConfig.marginBottom} onChange={e => setLayoutConfig({ ...layoutConfig, marginBottom: Number(e.target.value) })} /></div>
+                                            <div><label>Esq (Unidades)</label><input className="form-input" type="number" value={layoutConfig.marginLeft} onChange={e => setLayoutConfig({ ...layoutConfig, marginLeft: Number(e.target.value) })} /></div>
+                                            <div><label>Dir (Unidades)</label><input className="form-input" type="number" value={layoutConfig.marginRight} onChange={e => setLayoutConfig({ ...layoutConfig, marginRight: Number(e.target.value) })} /></div>
+                                        </div>
+                                        <div style={{ marginTop: '12px', padding: '10px', background: '#fef3c7', borderRadius: '8px', border: '1px solid #fcd34d' }}>
+                                            <p style={{ fontSize: '0.7rem', color: '#92400e', margin: 0, fontWeight: 700 }}>⚠️ REGRA DE OURO: MARGENS</p>
+                                            <p style={{ fontSize: '0.65rem', color: '#92400e', margin: 0, marginTop: '4px' }}>O conteúdo é recortado no limite desta margem. Se o card sumir, diminua a 'Escala da Caixa'.</p>
                                         </div>
                                     </div>
                                 </details>
@@ -2609,14 +2724,17 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                                 <details className="settings-group" open>
                                     <summary>Espaçamentos e Distâncias</summary>
                                     <div className="settings-content">
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                                            <div>
-                                                <label style={{ fontSize: '0.8rem' }}>Gap Horiz. (px)</label>
-                                                <input className="form-input" type="number" value={layoutConfig.gap} onChange={e => setLayoutConfig({ ...layoutConfig, gap: Number(e.target.value) })} />
-                                            </div>
-                                            <div>
-                                                <label style={{ fontSize: '0.8rem' }}>Gap Vert. (px)</label>
-                                                <input className="form-input" type="number" value={layoutConfig.rowGap || layoutConfig.gap} onChange={e => setLayoutConfig({ ...layoutConfig, rowGap: Number(e.target.value) })} />
+                                        <div style={{ marginBottom: '16px' }}>
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Espaçamento entre Cards (px)</label>
+                                            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <label style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Horizontal: {layoutConfig.gap}</label>
+                                                    <input type="range" min="0" max="100" value={layoutConfig.gap} onChange={e => setLayoutConfig({ ...layoutConfig, gap: Number(e.target.value) })} />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <label style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Vertical: {layoutConfig.rowGap !== undefined ? layoutConfig.rowGap : layoutConfig.gap}</label>
+                                                    <input type="range" min="0" max="100" value={layoutConfig.rowGap !== undefined ? layoutConfig.rowGap : layoutConfig.gap} onChange={e => setLayoutConfig({ ...layoutConfig, rowGap: Number(e.target.value) })} />
+                                                </div>
                                             </div>
                                         </div>
 
@@ -2799,27 +2917,32 @@ const FlyersModule: React.FC<FlyersModuleProps> = ({ isMasterMode = false, initi
                                             <input type="checkbox" checked={layoutConfig.promoMonth?.visible ?? false} onChange={e => setLayoutConfig({ ...layoutConfig, promoMonth: { ...(layoutConfig.promoMonth || DEFAULT_LAYOUT_CONFIG.promoMonth), visible: e.target.checked } })} />
                                         </div>
                                         <div className="form-group">
-                                            <input className="form-input" type="text" placeholder="Ex: Mês de Janeiro" value={layoutConfig.promoMonth?.text ?? ''} onChange={e => setLayoutConfig({ ...layoutConfig, promoMonth: { ...(layoutConfig.promoMonth || DEFAULT_LAYOUT_CONFIG.promoMonth), text: e.target.value } })} />
+                                            <select
+                                                className="form-input"
+                                                value={layoutConfig.promoMonth?.text || ''}
+                                                onChange={e => setLayoutConfig({
+                                                    ...layoutConfig,
+                                                    promoMonth: {
+                                                        ...(layoutConfig.promoMonth || DEFAULT_LAYOUT_CONFIG.promoMonth),
+                                                        text: e.target.value,
+                                                        visible: e.target.value !== ''
+                                                    }
+                                                })}
+                                            >
+                                                <option value="">Nenhum</option>
+                                                {['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'].map(m => (
+                                                    <option key={m} value={`MÊS DE ${m}`}>{m}</option>
+                                                ))}
+                                                <option value="OFERTAS DA SEMANA">OFERTAS DA SEMANA</option>
+                                                <option value="OFERTAS DO DIA">OFERTAS DO DIA</option>
+                                            </select>
                                         </div>
                                         <div className="form-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
                                             <div><label>Pos Y (px)</label><input className="form-input" type="number" value={layoutConfig.promoMonth?.y ?? 0} onChange={e => setLayoutConfig({ ...layoutConfig, promoMonth: { ...(layoutConfig.promoMonth || DEFAULT_LAYOUT_CONFIG.promoMonth), y: Number(e.target.value) } })} /></div>
                                             <div><label>Fonte (px)</label><input className="form-input" type="number" value={layoutConfig.promoMonth?.fontSize ?? 0} onChange={e => setLayoutConfig({ ...layoutConfig, promoMonth: { ...(layoutConfig.promoMonth || DEFAULT_LAYOUT_CONFIG.promoMonth), fontSize: Number(e.target.value) } })} /></div>
                                         </div>
 
-                                        <div style={{ height: '1px', background: 'var(--border-color)', margin: '15px 0' }}></div>
 
-                                        <h5 style={{ marginBottom: 10, marginTop: 10 }}>Selo Promocional (Dia)</h5>
-                                        <div className="form-group row">
-                                            <label>Habilitar</label>
-                                            <input type="checkbox" checked={layoutConfig.promoBadge?.visible ?? false} onChange={e => setLayoutConfig({ ...layoutConfig, promoBadge: { ...(layoutConfig.promoBadge || DEFAULT_LAYOUT_CONFIG.promoBadge), visible: e.target.checked } })} />
-                                        </div>
-                                        <div className="form-group">
-                                            <input className="form-input" type="text" placeholder="Ex: Terça da Carne" value={layoutConfig.promoBadge?.text ?? ''} onChange={e => setLayoutConfig({ ...layoutConfig, promoBadge: { ...(layoutConfig.promoBadge || DEFAULT_LAYOUT_CONFIG.promoBadge), text: e.target.value } })} />
-                                        </div>
-                                        <div className="form-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-                                            <div><label>Pos Y (px)</label><input className="form-input" type="number" value={layoutConfig.promoBadge?.y ?? 0} onChange={e => setLayoutConfig({ ...layoutConfig, promoBadge: { ...(layoutConfig.promoBadge || DEFAULT_LAYOUT_CONFIG.promoBadge), y: Number(e.target.value) } })} /></div>
-                                            <div><label>Escala</label><input className="form-input" type="number" step="0.1" value={layoutConfig.promoBadge?.scale ?? 1} onChange={e => setLayoutConfig({ ...layoutConfig, promoBadge: { ...(layoutConfig.promoBadge || DEFAULT_LAYOUT_CONFIG.promoBadge), scale: Number(e.target.value) } })} /></div>
-                                        </div>
                                     </div>
                                 </details>
 

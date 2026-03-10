@@ -14,7 +14,7 @@ import {
     CheckCircle2,
     Tags,
     Smartphone,
-    Target,
+
     Mic
 } from 'lucide-react';
 
@@ -33,7 +33,7 @@ export const MODULES = [
     { id: 'solicitacoes', name: 'Solicitações de Imagens', icon: Inbox, path: '/solicitacoes', adminOnly: true },
 
     { id: 'disparos-petville', name: 'Disparos PetVille', icon: Smartphone, path: '/disparos-petville' },
-    { id: 'meta-leads', name: 'Leads do Meta', icon: Target, path: '/meta-leads' },
+
     { id: 'locucoes', name: 'Locuções', icon: Mic, path: '/locucoes' },
     { id: 'tutoriais', name: 'Tutoriais', icon: BookOpen, path: '/tutoriais' },
     { id: 'empresas', name: 'Empresas', icon: Building2, path: '/empresas', superAdminOnly: true },
