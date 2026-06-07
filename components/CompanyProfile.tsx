@@ -33,6 +33,8 @@ const CompanyProfile = () => {
         subcategory: '', // NEW: Company subcategory
         color: '#2563eb', // Brand color
         openaiApiKey: '',
+        groqApiKey: '',
+        geminiApiKey: '',
         apiKey: '', // Internal API Key
         products: [] as { id: string; name: string; imageUrl: string; width?: number; height?: number; depth?: number }[],
         // Art Guidelines
@@ -84,8 +86,13 @@ const CompanyProfile = () => {
                             subcategory: data.subcategory || '',
                             color: data.color || '#2563eb',
                             openaiApiKey: data.openaiApiKey || '',
+                            groqApiKey: data.groqApiKey || '',
+                            geminiApiKey: data.geminiApiKey || '',
                             apiKey: data.crm?.apiKey || '',
                             products: data.products || [],
+                            toneOfVoice: data.artRules?.toneOfVoice || '',
+                            visualGuidelines: data.artRules?.visualGuidelines || '',
+                            visualAllowed: data.artRules?.visualAllowed || '',
                             visualForbidden: data.artRules?.visualForbidden || '',
                             referenceImages: data.artRules?.referenceImages || [],
                             imageBankSettings: data.imageBankSettings || {
@@ -112,23 +119,31 @@ const CompanyProfile = () => {
 
         setSaving(true);
         try {
+            const { apiKey, ...saveData } = formData;
+
+            const cleanArtRules = {
+                toneOfVoice: formData.toneOfVoice || '',
+                visualGuidelines: formData.visualGuidelines || '',
+                visualAllowed: formData.visualAllowed || '',
+                visualForbidden: formData.visualForbidden || '',
+                referenceImages: formData.referenceImages || [],
+            };
+
             await updateDoc(doc(db, 'companies', userData.companyId), {
-                ...formData,
-                products: formData.products,
-                artRules: {
-                    // preserve existing rules if possible, but here we likely overwrite from this source of truth
-                    toneOfVoice: formData.toneOfVoice,
-                    visualGuidelines: formData.visualGuidelines,
-                    visualAllowed: formData.visualAllowed,
-                    visualForbidden: formData.visualForbidden,
-                    referenceImages: formData.referenceImages,
+                ...saveData,
+                products: formData.products || [],
+                artRules: cleanArtRules,
+                'artRules.toneOfVoice': cleanArtRules.toneOfVoice,
+                'artRules.visualGuidelines': cleanArtRules.visualGuidelines,
+                'artRules.visualAllowed': cleanArtRules.visualAllowed,
+                'artRules.visualForbidden': cleanArtRules.visualForbidden,
+                'artRules.referenceImages': cleanArtRules.referenceImages,
+                imageBankSettings: formData.imageBankSettings || {
+                    customUrl: '',
+                    priority: 'global',
+                    searchByInternalCode: true,
+                    searchByName: true
                 },
-                'artRules.toneOfVoice': formData.toneOfVoice,
-                'artRules.visualGuidelines': formData.visualGuidelines,
-                'artRules.visualAllowed': formData.visualAllowed,
-                'artRules.visualForbidden': formData.visualForbidden,
-                'artRules.referenceImages': formData.referenceImages,
-                imageBankSettings: formData.imageBankSettings,
                 updatedAt: new Date().toISOString()
             });
             alert('Dados da empresa atualizados com sucesso!');
@@ -570,7 +585,8 @@ const CompanyProfile = () => {
                                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                     <Globe size={18} color="var(--primary-color)" /> Integrações & IA
                                 </h3>
-                                <div className="form-group">
+                                
+                                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                                     <label className="form-label" style={{ fontWeight: 600 }}>Chave API OpenAI</label>
                                     <div style={{ position: 'relative' }}>
                                         <input
@@ -587,6 +603,46 @@ const CompanyProfile = () => {
                                     </div>
                                     <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
                                         Esta chave será usada para análise de conteúdo e geração de legendas automáticas para sua empresa.
+                                    </p>
+                                </div>
+
+                                <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                                    <label className="form-label" style={{ fontWeight: 600 }}>Chave API Groq</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <input
+                                            type="password"
+                                            className="form-input w-full"
+                                            placeholder="gsk_..."
+                                            value={formData.groqApiKey}
+                                            onChange={e => setFormData({ ...formData, groqApiKey: e.target.value })}
+                                            style={{ paddingRight: '2.5rem' }}
+                                        />
+                                        <div style={{ position: 'absolute', right: '12px', top: '11px', opacity: 0.5 }}>
+                                            <Globe size={16} />
+                                        </div>
+                                    </div>
+                                    <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+                                        Esta chave será usada para o serviço de transcrição de áudio do CanvaZap.
+                                    </p>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontWeight: 600 }}>Chave API Google Gemini</label>
+                                    <div style={{ position: 'relative' }}>
+                                        <input
+                                            type="password"
+                                            className="form-input w-full"
+                                            placeholder="AIzaSy..."
+                                            value={formData.geminiApiKey}
+                                            onChange={e => setFormData({ ...formData, geminiApiKey: e.target.value })}
+                                            style={{ paddingRight: '2.5rem' }}
+                                        />
+                                        <div style={{ position: 'absolute', right: '12px', top: '11px', opacity: 0.5 }}>
+                                            <Globe size={16} />
+                                        </div>
+                                    </div>
+                                    <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+                                        Esta chave será usada para análise e resumo de transcrições de áudio.
                                     </p>
                                 </div>
                             </div>

@@ -29,6 +29,7 @@ import AntiparasiticBlastsModule from './components/AntiparasiticBlastsModule';
 import PetVilleBlastsModule from './components/PetVilleBlastsModule';
 
 import LocucoesModule from './components/LocucoesModule';
+import TranscreverZapModule from './components/TranscreverZapModule';
 import TutorialsModule from './components/TutorialsModule';
 import BadgeManagementModule from './components/BadgeManagementModule';
 
@@ -260,6 +261,7 @@ function App() {
             <Route path="/disparos-petville" element={<ProtectedRoute><PetVilleBlastsModule /></ProtectedRoute>} />
 
             <Route path="/locucoes" element={<ProtectedRoute><LocucoesModule /></ProtectedRoute>} />
+            <Route path="/transcrever-zap" element={<ProtectedRoute><TranscreverZapModule /></ProtectedRoute>} />
             <Route path="/tutoriais" element={<ProtectedRoute><TutorialsModule /></ProtectedRoute>} />
           </Route>
 

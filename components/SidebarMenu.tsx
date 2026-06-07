@@ -35,6 +35,7 @@ export const MODULES = [
     { id: 'disparos-petville', name: 'Disparos PetVille', icon: Smartphone, path: '/disparos-petville' },
 
     { id: 'locucoes', name: 'Locuções', icon: Mic, path: '/locucoes' },
+    { id: 'transcrever-zap', name: 'Transcrever do Zap', icon: Mic, path: '/transcrever-zap' },
     { id: 'tutoriais', name: 'Tutoriais', icon: BookOpen, path: '/tutoriais' },
     { id: 'empresas', name: 'Empresas', icon: Building2, path: '/empresas', superAdminOnly: true },
 ];

@@ -1,5 +1,6 @@
-// Grid format key type
-export type GridFormatKey = '1x1' | '2x2' | '3x2' | '3x3';
+// Grid format key type (expanded to support any "CxR" combination)
+export type GridFormatKey = string;
+export const PRESET_FORMATS = ['1x1', '2x2', '3x2', '3x3'] as const;
 
 // Grid format definition
 export interface GridFormat {

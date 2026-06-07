@@ -24,7 +24,7 @@ const MENU_GROUPS = [
     },
     {
         title: 'Administrativo',
-        items: ['crachas', 'locucoes', 'crm', 'usuarios', 'solicitacoes', 'tarefas', 'disparos-petville']
+        items: ['crachas', 'locucoes', 'transcrever-zap', 'crm', 'usuarios', 'solicitacoes', 'tarefas', 'disparos-petville']
     }
 ];
 

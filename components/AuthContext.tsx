@@ -43,6 +43,8 @@ interface UserData {
         lastPaymentDate?: any;
     };
     openaiApiKey?: string; // Added for AI features
+    groqApiKey?: string;
+    geminiApiKey?: string;
     imageBankSettings?: {
         customUrl: string;
         priority: 'company' | 'global';
@@ -247,11 +249,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // Fetch API Key independently if needed, or stick to what was loaded
             let openaiApiKey = '';
+            let groqApiKey = '';
+            let geminiApiKey = '';
             if (activeCompanyId) {
                 try {
                     const cDoc = await getDoc(doc(db, 'companies', activeCompanyId));
                     if (cDoc.exists()) {
                         openaiApiKey = cDoc.data().openaiApiKey || '';
+                        groqApiKey = cDoc.data().groqApiKey || '';
+                        geminiApiKey = cDoc.data().geminiApiKey || '';
                     }
                 } catch (e) { }
             }
@@ -290,6 +296,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 companySubscription: isHardcodedAdmin ? { plan: 'vitalicio', status: 'active' } : companySubscription,
                 imageBankSettings: imageBankSettings,
                 openaiApiKey: openaiApiKey,
+                groqApiKey: groqApiKey,
+                geminiApiKey: geminiApiKey,
                 isOwner: isHardcodedAdmin ? true : isOwner
             };
 
