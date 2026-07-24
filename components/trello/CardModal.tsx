@@ -39,9 +39,11 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
     const [newLabelColor, setNewLabelColor] = useState(LABEL_COLORS[0]);
     const [newLabelName, setNewLabelName] = useState('');
     const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>();
+    const isDirty = useRef(false);
     const isOpen = !!card;
 
     useEffect(() => {
+        isDirty.current = false;
         if (card) {
             setTitle(card.title || '');
             setDescription(card.description || '');
@@ -76,17 +78,26 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
         }
     }, [card?.id]);
 
+    const markDirty = useCallback(() => { isDirty.current = true; }, []);
+
     const autoSave = useCallback(() => {
+        if (!isDirty.current || !card?.id) return;
         if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
         autoSaveTimer.current = setTimeout(async () => {
             if (!card?.id) return;
-            await svc.updateCard(card.id, {
-                title, description, assigned_to: assignedTo || undefined,
-                client_id: clientId || undefined, solicitante_id: solicitanteId || undefined,
-                due_date: dueDate || undefined, start_date: startDate || undefined,
-                done, labels: labels.length ? labels : undefined,
-                checklists: checklists.length ? checklists : undefined,
-            } as any);
+            try {
+                await svc.updateCard(card.id, {
+                    title, description, assigned_to: assignedTo || undefined,
+                    client_id: clientId || undefined, solicitante_id: solicitanteId || undefined,
+                    due_date: dueDate || undefined, start_date: startDate || undefined,
+                    done,
+                    labels: labels.length ? labels : undefined,
+                    checklists: checklists.length ? checklists : undefined,
+                } as any);
+                isDirty.current = false;
+            } catch (e) {
+                console.error('[trello] auto-save failed:', e);
+            }
         }, 800);
     }, [card, title, description, assignedTo, clientId, solicitanteId, dueDate, startDate, done, labels, checklists]);
 
@@ -100,16 +111,23 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
             title, description, assigned_to: assignedTo || undefined,
             client_id: clientId || undefined, solicitante_id: solicitanteId || undefined,
             due_date: dueDate || undefined, start_date: startDate || undefined,
-            done, labels: labels.length ? labels : undefined,
+            done,
+            labels: labels.length ? labels : undefined,
             checklists: checklists.length ? checklists : undefined,
         };
-        if (card?.id) {
-            await svc.updateCard(card.id, payload);
-        } else if (stageId) {
-            await svc.insertCard({ ...payload, stage_id: stageId });
+        try {
+            if (card?.id) {
+                await svc.updateCard(card.id, payload);
+            } else if (stageId) {
+                await svc.insertCard({ ...payload, stage_id: stageId });
+            }
+            isDirty.current = false;
+            state.refreshView();
+            onClose();
+        } catch (e) {
+            console.error('[trello] save failed:', e);
+            alert('Erro ao salvar. Tente novamente.');
         }
-        state.refreshView();
-        onClose();
     };
 
     const handleDelete = async () => {
@@ -123,6 +141,7 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
     const addChecklist = () => {
         const name = prompt('Nome da checklist:');
         if (!name?.trim()) return;
+        markDirty();
         setChecklists(prev => [...prev, {
             id: Date.now().toString(), title: name.trim(), items: [],
         }]);
@@ -131,30 +150,35 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
     const addChecklistItem = (ci: number) => {
         const text = prompt('Novo item:');
         if (!text?.trim()) return;
+        markDirty();
         setChecklists(prev => prev.map((cl, i) => i === ci ? {
             ...cl, items: [...cl.items, { id: Date.now().toString(), text: text.trim(), done: false }],
         } : cl));
     };
 
     const toggleCheckItem = (ci: number, ii: number) => {
+        markDirty();
         setChecklists(prev => prev.map((cl, i) => i === ci ? {
             ...cl, items: cl.items.map((it, j) => j === ii ? { ...it, done: !it.done } : it),
         } : cl));
     };
 
     const deleteCheckItem = (ci: number, ii: number) => {
+        markDirty();
         setChecklists(prev => prev.map((cl, i) => i === ci ? {
             ...cl, items: cl.items.filter((_, j) => j !== ii),
         } : cl));
     };
 
     const addLabel = () => {
+        markDirty();
         setLabels(prev => [...prev, { id: Date.now().toString(), name: newLabelName || 'Etiqueta', color: newLabelColor }]);
         setNewLabelName('');
         setShowLabelPicker(false);
     };
 
     const removeLabel = (i: number) => {
+        markDirty();
         setLabels(prev => prev.filter((_, idx) => idx !== i));
     };
 
@@ -194,7 +218,7 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
                 <div style={{ padding: '16px 56px 8px 56px' }}>
                     <textarea
                         value={title}
-                        onChange={e => setTitle(e.target.value)}
+                        onChange={e => { markDirty(); setTitle(e.target.value); }}
                         rows={1}
                         placeholder="Título do cartão"
                         style={{
@@ -243,11 +267,11 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                         <label style={{ fontSize: 11, fontWeight: 700, color: '#A3AED0', textTransform: 'uppercase', letterSpacing: '.04em' }}>Data de início</label>
-                                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ height: 32, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 8px', outline: 'none' }} />
+                                        <input type="date" value={startDate} onChange={e => { markDirty(); setStartDate(e.target.value); }} style={{ height: 32, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 8px', outline: 'none' }} />
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                         <label style={{ fontSize: 11, fontWeight: 700, color: '#A3AED0', textTransform: 'uppercase', letterSpacing: '.04em' }}>Data de entrega</label>
-                                        <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={{ height: 32, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 8px', outline: 'none' }} />
+                                        <input type="date" value={dueDate} onChange={e => { markDirty(); setDueDate(e.target.value); }} style={{ height: 32, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 8px', outline: 'none' }} />
                                     </div>
                                 </div>
                             </div>
@@ -255,11 +279,11 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
 
                         {/* Client + Requester */}
                         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                            <select value={clientId} onChange={e => setClientId(e.target.value)} style={{ flex: 1, height: 34, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 10px', outline: 'none' }}>
+                            <select value={clientId} onChange={e => { markDirty(); setClientId(e.target.value); }} style={{ flex: 1, height: 34, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 10px', outline: 'none' }}>
                                 <option value="">— Empresa —</option>
                                 {state.allClients.filter(c => c.ativo !== false).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
-                            <select value={solicitanteId} onChange={e => setSolicitanteId(e.target.value)} style={{ flex: 1, height: 34, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 10px', outline: 'none' }}>
+                            <select value={solicitanteId} onChange={e => { markDirty(); setSolicitanteId(e.target.value); }} style={{ flex: 1, height: 34, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 10px', outline: 'none' }}>
                                 <option value="">— Solicitante —</option>
                                 {contacts.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
                             </select>
@@ -267,7 +291,7 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
 
                         {/* Member (required) */}
                         <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-                            <select value={assignedTo} onChange={e => { setAssignedTo(e.target.value); setShowMemberHint(false); }}
+                            <select value={assignedTo}                                 onChange={e => { markDirty(); setAssignedTo(e.target.value); setShowMemberHint(false); }}
                                 style={{ flex: 1, height: 34, borderRadius: 3, border: '2px solid transparent', background: 'rgba(9,30,66,0.06)', color: '#2B3674', fontSize: 13, padding: '0 10px', outline: 'none' }}>
                                 <option value="">⚠ Responsável obrigatório…</option>
                                 {state.allUsers.map(u => <option key={u.id} value={u.id}>{u.nome}</option>)}
@@ -281,7 +305,7 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
                         </div>
                         <textarea
                             value={description}
-                            onChange={e => setDescription(e.target.value)}
+                            onChange={e => { markDirty(); setDescription(e.target.value); }}
                             placeholder="Adicione uma descrição mais detalhada…"
                             style={{
                                 width: '100%', minHeight: 80, borderRadius: 3, border: 'none',
