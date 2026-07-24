@@ -3,6 +3,22 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'http://147.93.66.8:8100';
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
 
+const cache = new Map<string, { data: Buffer; status: number; headers: Record<string, string>; ts: number }>();
+const CACHE_TTL_MS = 5000;
+const CACHE_MAX = 200;
+
+function cacheKey(url: string, method: string): string {
+    return `${method}:${url}`;
+}
+
+function evictOld() {
+    if (cache.size <= CACHE_MAX) return;
+    const now = Date.now();
+    for (const [k, v] of cache) {
+        if (now - v.ts > CACHE_TTL_MS) cache.delete(k);
+    }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -31,18 +47,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const qs = params.toString();
     const targetUrl = `${SUPABASE_URL}/${sbpath}${qs ? '?' + qs : ''}`;
 
-    const headers: Record<string, string> = {};
-    for (const h of ['content-type', 'authorization', 'apikey', 'prefer', 'range', 'count', 'x-supabase-api-version']) {
-        if (req.headers[h]) {
-            headers[h] = req.headers[h] as string;
+    // Cache GET requests for 5s
+    if (req.method === 'GET') {
+        const key = cacheKey(targetUrl, 'GET');
+        const hit = cache.get(key);
+        if (hit && Date.now() - hit.ts < CACHE_TTL_MS) {
+            Object.entries(hit.headers).forEach(([k, v]) => res.setHeader(k, v));
+            return res.status(hit.status).send(hit.data);
+        }
+
+        try {
+            const upstream = await fetch(targetUrl, { method: 'GET', headers: buildHeaders(req) });
+            const headers: Record<string, string> = {};
+            upstream.headers.forEach((value, key) => {
+                const lower = key.toLowerCase();
+                if (!['transfer-encoding', 'connection', 'content-encoding'].includes(lower)) {
+                    headers[lower] = value;
+                }
+            });
+            const body = Buffer.from(await upstream.arrayBuffer());
+
+            evictOld();
+            cache.set(key, { data: body, status: upstream.status, headers, ts: Date.now() });
+
+            Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
+            return res.status(upstream.status).send(body);
+        } catch (error: any) {
+            return res.status(502).json({ error: 'Proxy error', message: error.message });
         }
     }
-    if (!headers['apikey'] && SUPABASE_ANON_KEY) {
-        headers['apikey'] = SUPABASE_ANON_KEY;
+
+    // Non-GET requests: invalidate cache for same base path, then forward
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        const basePath = sbpath.split('?')[0];
+        for (const k of cache.keys()) {
+            if (k.includes(basePath)) cache.delete(k);
+        }
     }
 
     try {
-        const fetchInit: RequestInit = { method: req.method, headers };
+        const fetchInit: RequestInit = { method: req.method, headers: buildHeaders(req) };
 
         if (req.method !== 'GET' && req.method !== 'HEAD') {
             if (typeof req.body === 'string') {
@@ -66,4 +110,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (error: any) {
         return res.status(502).json({ error: 'Proxy error', message: error.message });
     }
+}
+
+function buildHeaders(req: VercelRequest): Record<string, string> {
+    const headers: Record<string, string> = {};
+    for (const h of ['content-type', 'authorization', 'apikey', 'prefer', 'range', 'count', 'x-supabase-api-version']) {
+        if (req.headers[h]) {
+            headers[h] = req.headers[h] as string;
+        }
+    }
+    if (!headers['apikey'] && SUPABASE_ANON_KEY) {
+        headers['apikey'] = SUPABASE_ANON_KEY;
+    }
+    return headers;
 }

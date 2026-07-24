@@ -79,39 +79,23 @@ export async function fetchCardsByStages(
     clientId?: string
 ): Promise<Card[]> {
     let q = requireSb().from('cards')
-        .select('*,clients(name,logo_url),usuarios(nome,photo_url)')
+        .select('*,clients(name),usuarios(nome,photo_url)')
         .in('stage_id', stageIds)
         .order('due_date', { ascending: true, nullsFirst: false });
     if (assignedTo) q = q.eq('assigned_to', assignedTo);
     if (clientId) q = q.eq('client_id', clientId);
     const { data, error } = await q;
-    if (error) {
-        let q2 = requireSb().from('cards')
-            .select('*,clients(name),usuarios(nome,photo_url)')
-            .in('stage_id', stageIds)
-            .order('due_date', { ascending: true, nullsFirst: false });
-        if (assignedTo) q2 = q2.eq('assigned_to', assignedTo);
-        if (clientId) q2 = q2.eq('client_id', clientId);
-        const res = await q2;
-        return res.data || [];
-    }
+    if (error) { console.error('[trello] fetchCardsByStages error:', error); return []; }
     return data || [];
 }
 
 export async function fetchAllCards(clientId?: string): Promise<Card[]> {
     let q = requireSb().from('cards')
-        .select('*,clients(name,logo_url),usuarios(nome,photo_url)')
+        .select('*,clients(name),usuarios(nome,photo_url)')
         .order('due_date', { ascending: true, nullsFirst: false });
     if (clientId) q = q.eq('client_id', clientId);
     const { data, error } = await q;
-    if (error) {
-        let q2 = requireSb().from('cards')
-            .select('*,clients(name),usuarios(nome,photo_url)')
-            .order('due_date', { ascending: true, nullsFirst: false });
-        if (clientId) q2 = q2.eq('client_id', clientId);
-        const res = await q2;
-        return res.data || [];
-    }
+    if (error) { console.error('[trello] fetchAllCards error:', error); return []; }
     return data || [];
 }
 

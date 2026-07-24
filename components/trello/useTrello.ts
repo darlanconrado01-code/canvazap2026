@@ -76,7 +76,7 @@ export function useTrello() {
         setActivePipelineId(id);
         const stages = await svc.fetchStages(id);
         setCurrentStages(stages);
-        if (!activeUser) return;
+        if (!activeUser || stages.length === 0) { setMyCards([]); return; }
         const stageIds = stages.map(s => s.id);
         const cards = await svc.fetchCardsByStages(stageIds, viewAll ? undefined : activeUser.id, clientFilter || undefined);
         setMyCards(cards);
