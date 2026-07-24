@@ -12,6 +12,25 @@ function requireSb() {
     return sb;
 }
 
+function asArray<T>(v: unknown): T[] {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } }
+    return [];
+}
+
+function normalizeCard(c: any): Card {
+    return {
+        ...c,
+        labels: asArray(c.labels),
+        checklists: asArray(c.checklists),
+        attachments: asArray(c.attachments),
+    };
+}
+
+function normalizeCards(arr: any[]): Card[] {
+    return arr.map(normalizeCard);
+}
+
 // ═══ PIPELINES ═══
 export async function fetchPipelines(): Promise<Pipeline[]> {
     const { data, error } = await requireSb().from('pipelines').select('*').order('name');
@@ -86,7 +105,7 @@ export async function fetchCardsByStages(
     if (clientId) q = q.eq('client_id', clientId);
     const { data, error } = await q;
     if (error) { console.error('[trello] fetchCardsByStages error:', error); return []; }
-    return data || [];
+    return normalizeCards(data || []);
 }
 
 export async function fetchAllCards(clientId?: string): Promise<Card[]> {
@@ -96,7 +115,7 @@ export async function fetchAllCards(clientId?: string): Promise<Card[]> {
     if (clientId) q = q.eq('client_id', clientId);
     const { data, error } = await q;
     if (error) { console.error('[trello] fetchAllCards error:', error); return []; }
-    return data || [];
+    return normalizeCards(data || []);
 }
 
 export async function fetchCard(cardId: string): Promise<Card | null> {
@@ -104,7 +123,7 @@ export async function fetchCard(cardId: string): Promise<Card | null> {
         .select('*,clients(name,logo_url),usuarios(nome,photo_url)')
         .eq('id', cardId).single();
     if (error) return null;
-    return data;
+    return normalizeCard(data);
 }
 
 export async function insertCard(card: Partial<Card>): Promise<Card> {
@@ -347,7 +366,7 @@ export async function fetchPipelineData(
 
     const [stagesRes, cardsRes] = await Promise.all([stagesPromise, cardsPromise]);
     const stages = stagesRes.data || [];
-    const allCards = cardsRes.data || [];
+    const allCards = normalizeCards(cardsRes.data || []);
 
     const stageIds = new Set(stages.map(s => s.id));
     let cards = allCards.filter(c => stageIds.has(c.stage_id));
@@ -363,7 +382,7 @@ export async function searchCards(query: string, limit = 30): Promise<Card[]> {
         .select('*,clients(name),usuarios(nome,photo_url),pipeline_stages(name,pipeline_id)')
         .ilike('title', `%${query}%`)
         .limit(limit);
-    return data || [];
+    return normalizeCards(data || []);
 }
 
 // ═══ RECURRING CARDS ═══
@@ -372,7 +391,7 @@ export async function fetchRecurringCards(): Promise<Card[]> {
         .select('*,clients(name),usuarios(nome,photo_url),pipeline_stages(name,pipeline_id)')
         .gt('recurrence_days', 0)
         .order('due_date', { ascending: true, nullsFirst: false });
-    return data || [];
+    return normalizeCards(data || []);
 }
 
 // ═══ WEBHOOKS ═══
