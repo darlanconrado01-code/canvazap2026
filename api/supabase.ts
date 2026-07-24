@@ -4,8 +4,8 @@ const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'http://147.93.66.8:8100';
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
 
 const cache = new Map<string, { data: Buffer; status: number; headers: Record<string, string>; ts: number }>();
-const CACHE_TTL_MS = 5000;
-const CACHE_MAX = 200;
+const CACHE_TTL_MS = 60000;
+const CACHE_MAX = 500;
 
 function cacheKey(url: string, method: string): string {
     return `${method}:${url}`;
@@ -28,7 +28,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).end();
     }
 
-    // Client sends ?sbpath=rest/v1/pipelines&select=name
     const sbpath = (req.query.sbpath as string) || '';
     if (!sbpath) {
         return res.status(400).json({ error: 'Missing sbpath query parameter' });
@@ -47,17 +46,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const qs = params.toString();
     const targetUrl = `${SUPABASE_URL}/${sbpath}${qs ? '?' + qs : ''}`;
 
-    // Cache GET requests for 5s
     if (req.method === 'GET') {
         const key = cacheKey(targetUrl, 'GET');
         const hit = cache.get(key);
         if (hit && Date.now() - hit.ts < CACHE_TTL_MS) {
+            res.setHeader('X-Cache', 'HIT');
+            res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
             Object.entries(hit.headers).forEach(([k, v]) => res.setHeader(k, v));
             return res.status(hit.status).send(hit.data);
         }
 
         try {
-            const upstream = await fetch(targetUrl, { method: 'GET', headers: buildHeaders(req) });
+            const upstream = await fetch(targetUrl, {
+                method: 'GET',
+                headers: buildHeaders(req),
+                signal: AbortSignal.timeout(15000),
+            });
             const headers: Record<string, string> = {};
             upstream.headers.forEach((value, key) => {
                 const lower = key.toLowerCase();
@@ -70,6 +74,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             evictOld();
             cache.set(key, { data: body, status: upstream.status, headers, ts: Date.now() });
 
+            res.setHeader('X-Cache', 'MISS');
+            res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
             Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
             return res.status(upstream.status).send(body);
         } catch (error: any) {
@@ -77,7 +83,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
     }
 
-    // Non-GET requests: invalidate cache for same base path, then forward
     if (req.method !== 'GET' && req.method !== 'HEAD') {
         const basePath = sbpath.split('?')[0];
         for (const k of cache.keys()) {

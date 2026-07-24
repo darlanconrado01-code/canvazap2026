@@ -332,6 +332,31 @@ export async function updateAlarmeDestinatario(id: string, updates: Partial<Alar
     await requireSb().from('alarme_destinatarios').update(updates).eq('id', id);
 }
 
+// ═══ PIPELINE DATA (batch) ═══
+export async function fetchPipelineData(
+    pipelineId: string,
+    assignedTo?: string,
+    clientId?: string
+): Promise<{ stages: PipelineStage[]; cards: Card[] }> {
+    const sb = requireSb();
+    const stagesPromise = sb.from('pipeline_stages')
+        .select('*').eq('pipeline_id', pipelineId).order('position');
+    const cardsPromise = sb.from('cards')
+        .select('*,clients(name),usuarios(nome,photo_url)')
+        .order('due_date', { ascending: true, nullsFirst: false });
+
+    const [stagesRes, cardsRes] = await Promise.all([stagesPromise, cardsPromise]);
+    const stages = stagesRes.data || [];
+    const allCards = cardsRes.data || [];
+
+    const stageIds = new Set(stages.map(s => s.id));
+    let cards = allCards.filter(c => stageIds.has(c.stage_id));
+    if (assignedTo) cards = cards.filter(c => c.assigned_to === assignedTo);
+    if (clientId) cards = cards.filter(c => c.client_id === clientId);
+
+    return { stages, cards };
+}
+
 // ═══ SEARCH ═══
 export async function searchCards(query: string, limit = 30): Promise<Card[]> {
     const { data } = await requireSb().from('cards')

@@ -17,6 +17,7 @@ export function useTrello() {
     const [allUsers, setAllUsers] = useState<TrelloUser[]>([]);
     const [allClients, setAllClients] = useState<Client[]>([]);
     const [allPermissions, setAllPermissions] = useState<PipelinePermission[]>([]);
+    const [allStagesMap, setAllStagesMap] = useState<Map<string, PipelineStage[]>>(new Map());
     const [viewMode, setViewMode] = useState<ViewMode>('kanban');
     const [showDone, setShowDone] = useState(false);
     const [viewAll, setViewAll] = useState(false);
@@ -43,16 +44,24 @@ export function useTrello() {
     const init = useCallback(async () => {
         setLoading(true);
         try {
-            const [pipes, cli, usr, perms] = await Promise.all([
+            const [pipes, cli, usr, perms, allStages] = await Promise.all([
                 svc.fetchPipelines(),
                 svc.fetchClients(),
                 svc.fetchUsers(),
                 svc.fetchPermissions(),
+                svc.fetchAllStages(),
             ]);
             setAllPipelines(pipes);
             setAllClients(cli);
             setAllUsers(usr);
             setAllPermissions(perms);
+            const stagesMap = new Map<string, PipelineStage[]>();
+            for (const s of allStages) {
+                const list = stagesMap.get(s.pipeline_id) || [];
+                list.push(s);
+                stagesMap.set(s.pipeline_id, list);
+            }
+            setAllStagesMap(stagesMap);
         } finally {
             setLoading(false);
         }
@@ -74,13 +83,16 @@ export function useTrello() {
 
     const switchPipeline = useCallback(async (id: string) => {
         setActivePipelineId(id);
-        const stages = await svc.fetchStages(id);
+        const stages = allStagesMap.get(id) || [];
         setCurrentStages(stages);
         if (!activeUser || stages.length === 0) { setMyCards([]); return; }
-        const stageIds = stages.map(s => s.id);
-        const cards = await svc.fetchCardsByStages(stageIds, viewAll ? undefined : activeUser.id, clientFilter || undefined);
+        const cards = await svc.fetchCardsByStages(
+            stages.map(s => s.id),
+            viewAll ? undefined : activeUser.id,
+            clientFilter || undefined
+        );
         setMyCards(cards);
-    }, [activeUser, viewAll, clientFilter]);
+    }, [activeUser, viewAll, clientFilter, allStagesMap]);
 
     const refreshView = useCallback(async () => {
         if (refreshLock.current) return;
