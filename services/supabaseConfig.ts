@@ -14,19 +14,24 @@ const PROXY_BASE = `${window.location.origin}/api/supabase`;
 export function createProxiedClient(): SupabaseClient | null {
     if (!isValidUrl) return null;
 
+    const supabaseOrigin = new URL(supabaseUrl).origin;
+
     const client = createClient(supabaseUrl, supabaseAnonKey, {
         global: {
             fetch: async (url: string | URL | Request, init?: RequestInit) => {
                 const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-                let targetUrl = u;
-                if (u.startsWith(PROXY_BASE + '/')) {
-                    const rest = u.substring(PROXY_BASE.length + 1);
-                    const qi = rest.indexOf('?');
-                    const path = qi >= 0 ? rest.substring(0, qi) : rest;
-                    const qs = qi >= 0 ? rest.substring(qi + 1) : '';
-                    targetUrl = PROXY_BASE + '?sbpath=' + encodeURIComponent(path) + (qs ? '&' + qs : '');
+
+                // If the URL points to the Supabase server, route through the proxy
+                if (u.startsWith(supabaseOrigin + '/')) {
+                    const pathAndQuery = u.substring(supabaseOrigin.length + 1);
+                    const qi = pathAndQuery.indexOf('?');
+                    const path = qi >= 0 ? pathAndQuery.substring(0, qi) : pathAndQuery;
+                    const qs = qi >= 0 ? pathAndQuery.substring(qi + 1) : '';
+                    const proxyUrl = PROXY_BASE + '?sbpath=' + encodeURIComponent(path) + (qs ? '&' + qs : '');
+                    return fetch(proxyUrl, init);
                 }
-                return fetch(targetUrl, init);
+
+                return fetch(u, init);
             }
         }
     });
