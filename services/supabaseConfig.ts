@@ -10,9 +10,13 @@ export const supabase: SupabaseClient | null = isValidUrl
     : null;
 
 const PROXY_BASE = `${window.location.origin}/api/supabase`;
+const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 export function createProxiedClient(): SupabaseClient | null {
     if (!isValidUrl) return null;
+
+    // In localhost, connect directly (no mixed content issues on HTTP)
+    if (IS_LOCAL) return createClient(supabaseUrl, supabaseAnonKey);
 
     const supabaseOrigin = new URL(supabaseUrl).origin;
 
@@ -21,7 +25,7 @@ export function createProxiedClient(): SupabaseClient | null {
             fetch: async (url: string | URL | Request, init?: RequestInit) => {
                 const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
 
-                // If the URL points to the Supabase server, route through the proxy
+                // Route all Supabase requests through the proxy to avoid mixed content
                 if (u.startsWith(supabaseOrigin + '/')) {
                     const pathAndQuery = u.substring(supabaseOrigin.length + 1);
                     const qi = pathAndQuery.indexOf('?');

@@ -7,6 +7,12 @@ const LABEL_COLORS = ['#61bd4f', '#f2d600', '#ff9f1a', '#eb5a46', '#c377e0', '#0
 
 function esc(s: string) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+function asArray<T>(v: unknown): T[] {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } }
+    return [];
+}
+
 interface Props {
     card: Card | null;
     stageId: string | null;
@@ -45,8 +51,8 @@ export default function CardModal({ card, stageId, state, onClose }: Props) {
             setDueDate(card.due_date || '');
             setStartDate(card.start_date || '');
             setDone(!!card.done);
-            setLabels(card.labels || []);
-            setChecklists(card.checklists || []);
+            setLabels(asArray<Label>(card.labels));
+            setChecklists(asArray<Checklist>(card.checklists));
         } else {
             setTitle(''); setDescription(''); setAssignedTo(''); setClientId('');
             setSolicitanteId(''); setDueDate(''); setStartDate(''); setDone(false);
