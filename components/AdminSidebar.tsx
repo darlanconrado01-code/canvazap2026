@@ -25,7 +25,8 @@ import {
     Receipt,
     Wand2,
     Camera,
-    CreditCard
+    CreditCard,
+    Kanban
 } from 'lucide-react';
 import { auth, db } from '../services/firebaseConfig';
 import { collection, query, where, limit, onSnapshot } from 'firebase/firestore';
@@ -145,6 +146,11 @@ const AdminSidebar = () => {
                     <span>Banco de Vozes</span>
                 </NavLink>
 
+                <NavLink to="/admin/transcrever-zap" onClick={handleLinkClick} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                    <Mic size={20} />
+                    <span>Transcrever do Zap</span>
+                </NavLink>
+
                 <NavLink to="/admin/crachas" onClick={handleLinkClick} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                     <CreditCard size={20} />
                     <span>Gestão de Crachás</span>
@@ -198,6 +204,11 @@ const AdminSidebar = () => {
                 <NavLink to="/admin/tutoriais" onClick={handleLinkClick} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                     <BookOpen size={20} />
                     <span>Tutoriais</span>
+                </NavLink>
+
+                <NavLink to="/admin/trello" onClick={handleLinkClick} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                    <Kanban size={20} />
+                    <span>Trello</span>
                 </NavLink>
 
 

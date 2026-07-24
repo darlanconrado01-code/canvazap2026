@@ -50,6 +50,7 @@ import AdminLocutoresModule from './components/AdminLocutoresModule';
 import BudgetModule from './components/BudgetModule';
 import PublicProposal from './components/PublicProposal';
 import SuperAdminArtModule from './components/SuperAdminArtModule';
+import TrelloModule from './components/TrelloModule';
 
 // Protected Route Component
 const ValidateSession = ({ children }: { children: React.ReactElement }) => {
@@ -230,6 +231,8 @@ function App() {
             <Route path="merchandise" element={<MerchandiseModule />} />
             <Route path="crachas" element={<BadgeManagementModule />} />
             <Route path="tutoriais" element={<TutorialsModule />} />
+            <Route path="transcrever-zap" element={<TranscreverZapModule />} />
+            <Route path="trello" element={<TrelloModule />} />
           </Route>
 
           {/* Public Proposal Route */}
